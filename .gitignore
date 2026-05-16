@@ -1,11 +1,39 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
 # Compiled class file
 *.class
+
+# Build output
+build/
+.gradle/
+
+# Gradle wrapper jar (properties file is committed; binary is not)
+gradle/wrapper/gradle-wrapper.jar
 
 # Log file
 *.log
 
 # BlueJ files
 *.ctxt
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code
+.vscode/
+.env
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
 
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
