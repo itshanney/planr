@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.leagueplan.planr.PlanrApp;
-import org.leagueplan.planr.model.AvailabilityWindow;
 import org.leagueplan.planr.model.League;
+import org.leagueplan.planr.model.LeagueConfig;
 import org.leagueplan.planr.model.Schedule;
 import org.leagueplan.planr.model.ScheduleStatus;
 import org.leagueplan.planr.model.ScheduledGame;
@@ -97,36 +97,25 @@ public class ScheduleCommand implements Runnable {
                 if (!hasEligibleDivision) {
                     System.err.println(
                         "Error: Schedule generation requires at least one division with 2 or more teams "
-                        + "and at least one field with an availability window.");
+                        + "and at least one field.");
                     return 1;
                 }
 
-                // Precondition: at least one field with a window
-                boolean hasFieldWithWindow = league.fields().stream()
-                    .anyMatch(f -> !f.windows().isEmpty());
-                if (!hasFieldWithWindow) {
+                // Precondition: at least one field configured
+                if (league.fields().isEmpty()) {
                     System.err.println(
                         "Error: Schedule generation requires at least one division with 2 or more teams "
-                        + "and at least one field with an availability window.");
+                        + "and at least one field.");
                     return 1;
                 }
 
-                // Precondition: no orphaned division references in any window
-                for (var field : league.fields()) {
-                    for (AvailabilityWindow w : field.windows()) {
-                        if (w.divisionId() != null) {
-                            boolean exists = league.divisions().stream()
-                                .anyMatch(d -> d.id().equals(w.divisionId()));
-                            if (!exists) {
-                                System.err.printf(
-                                    "Error: Field \"%s\" has windows referencing deleted divisions. "
-                                    + "Fix or remove them before generating. "
-                                    + "Run 'planr field window list \"%s\"' to review.%n",
-                                    field.name(), field.name());
-                                return 1;
-                            }
-                        }
-                    }
+                // Precondition: league config has sunrise and sunset set
+                LeagueConfig config = league.config();
+                if (config == null || config.sunriseTime() == null || config.sunsetTime() == null) {
+                    System.err.println(
+                        "Error: Schedule generation requires league config with sunrise and sunset times. "
+                        + "Run 'planr config set --sunrise HH:mm --sunset HH:mm' first.");
+                    return 1;
                 }
 
                 System.out.println("Generating schedule, this may take up to 60 seconds...");

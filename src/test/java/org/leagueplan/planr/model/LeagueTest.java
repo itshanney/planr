@@ -18,8 +18,8 @@ class LeagueTest {
 
     @BeforeEach
     void setUp() {
-        majors = new Division(DIV_ID, "Majors", 120, List.of());
-        league = new League(1, List.of(majors), List.of(), null);
+        majors = new Division(DIV_ID, "Majors", 120, 0, List.of());
+        league = new League(1, null, List.of(majors), List.of(), null);
     }
 
     // --- empty() ---
@@ -28,7 +28,7 @@ class LeagueTest {
     @DisplayName("empty() returns current version with no divisions or fields")
     void empty_hasCurrentVersionAndNoContent() {
         League empty = League.empty();
-        assertEquals(3, empty.version());
+        assertEquals(4, empty.version());
         assertTrue(empty.divisions().isEmpty());
         assertTrue(empty.fields().isEmpty());
     }
@@ -76,7 +76,7 @@ class LeagueTest {
     @Test
     @DisplayName("withDivisionAdded appends the division and preserves existing ones")
     void withDivisionAdded_appendsDivision() {
-        Division aaa = new Division(UUID.randomUUID(), "AAA", 90, List.of());
+        Division aaa = new Division(UUID.randomUUID(), "AAA", 90, 0, List.of());
         League updated = league.withDivisionAdded(aaa);
         assertEquals(2, updated.divisions().size());
         assertTrue(updated.hasDivision("Majors"));
@@ -86,14 +86,14 @@ class LeagueTest {
     @Test
     @DisplayName("withDivisionAdded does not mutate the original league")
     void withDivisionAdded_isImmutable() {
-        league.withDivisionAdded(new Division(UUID.randomUUID(), "AAA", 90, List.of()));
+        league.withDivisionAdded(new Division(UUID.randomUUID(), "AAA", 90, 0, List.of()));
         assertEquals(1, league.divisions().size());
     }
 
     @Test
     @DisplayName("withDivisionAdded preserves the version number")
     void withDivisionAdded_preservesVersion() {
-        League updated = league.withDivisionAdded(new Division(UUID.randomUUID(), "AAA", 90, List.of()));
+        League updated = league.withDivisionAdded(new Division(UUID.randomUUID(), "AAA", 90, 0, List.of()));
         assertEquals(1, updated.version());
     }
 
@@ -102,7 +102,7 @@ class LeagueTest {
     @Test
     @DisplayName("withDivisionReplaced swaps only the targeted division")
     void withDivisionReplaced_replacesTarget() {
-        Division replacement = new Division(DIV_ID, "Majors-Updated", 150, List.of());
+        Division replacement = new Division(DIV_ID, "Majors-Updated", 150, 0, List.of());
         League updated = league.withDivisionReplaced(DIV_ID, replacement);
         assertEquals(1, updated.divisions().size());
         assertEquals("Majors-Updated", updated.divisions().get(0).name());
@@ -113,8 +113,8 @@ class LeagueTest {
     @DisplayName("withDivisionReplaced leaves untargeted divisions unchanged")
     void withDivisionReplaced_preservesOtherDivisions() {
         UUID aaaId = UUID.randomUUID();
-        League twoDiv = league.withDivisionAdded(new Division(aaaId, "AAA", 90, List.of()));
-        League updated = twoDiv.withDivisionReplaced(DIV_ID, new Division(DIV_ID, "Majors-Updated", 150, List.of()));
+        League twoDiv = league.withDivisionAdded(new Division(aaaId, "AAA", 90, 0, List.of()));
+        League updated = twoDiv.withDivisionReplaced(DIV_ID, new Division(DIV_ID, "Majors-Updated", 150, 0, List.of()));
         assertEquals(2, updated.divisions().size());
         assertTrue(updated.hasDivision("AAA"));
         assertTrue(updated.hasDivision("Majors-Updated"));
@@ -134,7 +134,7 @@ class LeagueTest {
     @DisplayName("withDivisionRemoved leaves untargeted divisions unchanged")
     void withDivisionRemoved_preservesOtherDivisions() {
         UUID aaaId = UUID.randomUUID();
-        League twoDiv = league.withDivisionAdded(new Division(aaaId, "AAA", 90, List.of()));
+        League twoDiv = league.withDivisionAdded(new Division(aaaId, "AAA", 90, 0, List.of()));
         League updated = twoDiv.withDivisionRemoved(DIV_ID);
         assertEquals(1, updated.divisions().size());
         assertTrue(updated.hasDivision("AAA"));

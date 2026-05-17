@@ -11,7 +11,9 @@ import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.leagueplan.planr.model.Field;
 import org.leagueplan.planr.model.League;
+import org.leagueplan.planr.model.LeagueConfig;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 public class LeagueStore {
 
@@ -64,12 +67,22 @@ public class LeagueStore {
         }
         League league = mapper.readValue(LEAGUE_FILE.toFile(), League.class);
         if (league.version() == 1) {
-            league = new League(2, league.divisions(), league.fields(), null);
+            league = new League(2, null, league.divisions(), List.of(), null);
             save(league);
         }
         if (league.version() == 2) {
-            league = new League(3, league.divisions(), league.fields(), null);
+            league = new League(3, null, league.divisions(), league.fields(), null);
             save(league);
+        }
+        if (league.version() < 4) {
+            List<Field> migratedFields = league.fields().stream()
+                .map(f -> new Field(f.id(), f.name(), f.address(), List.of(), List.of()))
+                .toList();
+            LeagueConfig config = LeagueConfig.empty();
+            league = new League(4, config, league.divisions(), migratedFields, league.schedule());
+            save(league);
+            System.err.println("Warning: Field availability windows from a previous version "
+                + "have been removed. Please configure field blocks for the new season.");
         }
         return league;
     }

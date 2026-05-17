@@ -1,13 +1,12 @@
 package org.leagueplan.planr.model;
 
-import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
 
-public record AvailabilityWindow(
+public record FieldBlock(
     UUID id,
-    DayOfWeek dayOfWeek,
+    LocalDate date,
     LocalTime startTime,
-    LocalTime endTime,
-    UUID divisionId
+    LocalTime endTime
 ) {}

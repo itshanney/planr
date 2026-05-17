@@ -23,7 +23,8 @@ import java.util.concurrent.Callable;
         FieldCommand.EditCmd.class,
         FieldCommand.DeleteCmd.class,
         FieldCommand.ListCmd.class,
-        FieldWindowCommand.class
+        FieldBlockCommand.class,
+        FieldOverrideCommand.class
     },
     mixinStandardHelpOptions = true
 )
@@ -61,7 +62,7 @@ public class FieldCommand implements Runnable {
                     System.err.printf("Error: Field \"%s\" already exists.%n", name);
                     return 1;
                 }
-                Field field = new Field(UUID.randomUUID(), name, address, List.of());
+                Field field = new Field(UUID.randomUUID(), name, address, List.of(), List.of());
                 parent.app.store.save(league.withFieldAdded(field));
                 System.out.printf("Field \"%s\" added.%n", name);
                 return 0;
@@ -123,11 +124,11 @@ public class FieldCommand implements Runnable {
             // Empty string clears the address; null means unchanged.
             String resolvedAddress = (newAddress == null) ? field.address()
                                    : (newAddress.isBlank() ? null : newAddress);
-            return new Field(field.id(), resolvedName, resolvedAddress, field.windows());
+            return new Field(field.id(), resolvedName, resolvedAddress, field.blocks(), field.dateOverrides());
         }
     }
 
-    @Command(name = "delete", description = "Delete a field and all its availability windows.")
+    @Command(name = "delete", description = "Delete a field and all its blocks and overrides.")
     static class DeleteCmd implements Callable<Integer> {
 
         @ParentCommand FieldCommand parent;
@@ -144,10 +145,11 @@ public class FieldCommand implements Runnable {
                     System.err.printf("Error: Field \"%s\" not found.%n", name);
                     return 1;
                 }
-                int windowCount = existing.get().windows().size();
+                int blockCount = existing.get().blocks().size();
+                int overrideCount = existing.get().dateOverrides().size();
                 parent.app.store.save(league.withFieldRemoved(existing.get().id()));
-                System.out.printf("Field \"%s\" and %d availability window(s) deleted.%n",
-                    existing.get().name(), windowCount);
+                System.out.printf("Field \"%s\" deleted (%d block(s), %d override(s) removed).%n",
+                    existing.get().name(), blockCount, overrideCount);
                 return 0;
             } catch (IOException e) {
                 System.err.printf("Error: Failed to access league data: %s%n", e.getMessage());
@@ -184,18 +186,25 @@ public class FieldCommand implements Runnable {
                 fields.stream()
                     .mapToInt(f -> f.address() == null ? "(none)".length() : f.address().length())
                     .max().orElse(0));
-            int windowsWidth = Math.max("WINDOWS".length(),
+            int blocksWidth = Math.max("BLOCKS".length(),
                 fields.stream()
-                    .mapToInt(f -> String.valueOf(f.windows().size()).length())
+                    .mapToInt(f -> String.valueOf(f.blocks().size()).length())
+                    .max().orElse(0));
+            int overridesWidth = Math.max("OVERRIDES".length(),
+                fields.stream()
+                    .mapToInt(f -> String.valueOf(f.dateOverrides().size()).length())
                     .max().orElse(0));
 
-            String fmt = "%-" + nameWidth + "s    %-" + addressWidth + "s    %-" + windowsWidth + "s%n";
-            System.out.printf(fmt, "NAME", "ADDRESS", "WINDOWS");
-            System.out.printf(fmt, "-".repeat(nameWidth), "-".repeat(addressWidth), "-".repeat(windowsWidth));
+            String fmt = "%-" + nameWidth + "s    %-" + addressWidth + "s    %-"
+                + blocksWidth + "s    %-" + overridesWidth + "s%n";
+            System.out.printf(fmt, "NAME", "ADDRESS", "BLOCKS", "OVERRIDES");
+            System.out.printf(fmt, "-".repeat(nameWidth), "-".repeat(addressWidth),
+                "-".repeat(blocksWidth), "-".repeat(overridesWidth));
             fields.forEach(f -> System.out.printf(fmt,
                 f.name(),
                 f.address() == null ? "(none)" : f.address(),
-                f.windows().size()));
+                f.blocks().size(),
+                f.dateOverrides().size()));
         }
     }
 }

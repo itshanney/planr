@@ -5,7 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-public record Division(UUID id, String name, int gameDurationMinutes, List<Team> teams) {
+public record Division(UUID id, String name, int gameDurationMinutes, int targetGamesPerTeam, List<Team> teams) {
 
     public Optional<Team> findTeam(String name) {
         return teams.stream()
@@ -18,17 +18,17 @@ public record Division(UUID id, String name, int gameDurationMinutes, List<Team>
     }
 
     public Division withTeamAdded(Team team) {
-        return new Division(id, this.name, gameDurationMinutes,
+        return new Division(id, this.name, gameDurationMinutes, targetGamesPerTeam,
             Stream.concat(teams.stream(), Stream.of(team)).toList());
     }
 
     public Division withTeamReplaced(UUID teamId, Team replacement) {
-        return new Division(id, this.name, gameDurationMinutes,
+        return new Division(id, this.name, gameDurationMinutes, targetGamesPerTeam,
             teams.stream().map(t -> t.id().equals(teamId) ? replacement : t).toList());
     }
 
     public Division withTeamRemoved(UUID teamId) {
-        return new Division(id, this.name, gameDurationMinutes,
+        return new Division(id, this.name, gameDurationMinutes, targetGamesPerTeam,
             teams.stream().filter(t -> !t.id().equals(teamId)).toList());
     }
 }

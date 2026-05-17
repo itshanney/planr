@@ -52,7 +52,7 @@ class LeagueStoreTest {
         League league = store.load();
         assertTrue(league.divisions().isEmpty());
         assertTrue(league.fields().isEmpty());
-        assertEquals(3, league.version());
+        assertEquals(4, league.version());
     }
 
     @Test
@@ -80,14 +80,14 @@ class LeagueStoreTest {
         League loaded = store.load();
         assertTrue(loaded.divisions().isEmpty());
         assertTrue(loaded.fields().isEmpty());
-        assertEquals(3, loaded.version());
+        assertEquals(4, loaded.version());
     }
 
     @Test
     @DisplayName("save() and load() round-trips all division fields including UUID")
     void saveAndLoad_roundTripsDivisionFields() throws IOException {
         UUID divId = UUID.randomUUID();
-        store.save(new League(1, List.of(new Division(divId, "Majors", 120, List.of())), List.of(), null));
+        store.save(new League(4, null, List.of(new Division(divId, "Majors", 120, 0, List.of())), List.of(), null));
 
         League loaded = store.load();
         assertEquals(1, loaded.divisions().size());
@@ -102,8 +102,8 @@ class LeagueStoreTest {
     void saveAndLoad_roundTripsTeams() throws IOException {
         UUID teamId = UUID.randomUUID();
         Team team = new Team(teamId, "Blue Jays");
-        Division division = new Division(UUID.randomUUID(), "Majors", 120, List.of(team));
-        store.save(new League(1, List.of(division), List.of(), null));
+        Division division = new Division(UUID.randomUUID(), "Majors", 120, 0, List.of(team));
+        store.save(new League(4, null, List.of(division), List.of(), null));
 
         List<Team> loadedTeams = store.load().divisions().get(0).teams();
         assertEquals(1, loadedTeams.size());
@@ -115,12 +115,12 @@ class LeagueStoreTest {
     @DisplayName("save() and load() preserves insertion order of multiple divisions")
     void saveAndLoad_preservesDivisionOrder() throws IOException {
         List<Division> divisions = List.of(
-            new Division(UUID.randomUUID(), "Majors", 120, List.of()),
-            new Division(UUID.randomUUID(), "AAA",    90,  List.of()),
-            new Division(UUID.randomUUID(), "Coast",  90,  List.of()),
-            new Division(UUID.randomUUID(), "T-Ball", 60,  List.of())
+            new Division(UUID.randomUUID(), "Majors", 120, 0, List.of()),
+            new Division(UUID.randomUUID(), "AAA",    90,  0, List.of()),
+            new Division(UUID.randomUUID(), "Coast",  90,  0, List.of()),
+            new Division(UUID.randomUUID(), "T-Ball", 60,  0, List.of())
         );
-        store.save(new League(1, divisions, List.of(), null));
+        store.save(new League(4, null, divisions, List.of(), null));
 
         List<Division> loaded = store.load().divisions();
         assertEquals(4, loaded.size());
@@ -133,17 +133,16 @@ class LeagueStoreTest {
     @Test
     @DisplayName("save() and load() round-trips a division name containing special characters")
     void saveAndLoad_roundTripsSpecialCharactersInName() throws IOException {
-        Division division = new Division(UUID.randomUUID(), "T-Ball & Rookie", 60, List.of());
-        store.save(new League(1, List.of(division), List.of(), null));
+        Division division = new Division(UUID.randomUUID(), "T-Ball & Rookie", 60, 0, List.of());
+        store.save(new League(4, null, List.of(division), List.of(), null));
         assertEquals("T-Ball & Rookie", store.load().divisions().get(0).name());
     }
 
     // --- schema migrations ---
 
     @Test
-    @DisplayName("load() silently migrates a v2 file to v3, adding null schedule field")
-    void load_migratesV2ToV3() throws IOException {
-        // Write a v2 league file (no schedule field) directly.
+    @DisplayName("load() migrates a v2 file all the way to v4")
+    void load_migratesV2ToV4() throws IOException {
         String v2Json = """
             {
               "version": 2,
@@ -155,15 +154,15 @@ class LeagueStoreTest {
         Files.writeString(LEAGUE_FILE, v2Json);
 
         League loaded = store.load();
-        assertEquals(3, loaded.version());
+        assertEquals(4, loaded.version());
         assertNull(loaded.schedule());
         assertTrue(loaded.divisions().isEmpty());
         assertTrue(loaded.fields().isEmpty());
     }
 
     @Test
-    @DisplayName("load() writes the migrated v3 file back to disk")
-    void load_writesMigratedV3FileToDisk() throws IOException {
+    @DisplayName("load() writes the migrated v4 file back to disk")
+    void load_writesMigratedV4FileToDisk() throws IOException {
         String v2Json = """
             {
               "version": 2,
@@ -176,15 +175,13 @@ class LeagueStoreTest {
 
         store.load();
 
-        // Re-read the file to confirm it was updated to v3.
         League onDisk = new LeagueStore().load();
-        assertEquals(3, onDisk.version());
+        assertEquals(4, onDisk.version());
     }
 
     @Test
-    @DisplayName("load() migrates a v1 file all the way to v3 in a single call")
-    void load_migratesV1ToV3InSingleLoad() throws IOException {
-        // v1 has neither fields nor schedule.
+    @DisplayName("load() migrates a v1 file all the way to v4 in a single call")
+    void load_migratesV1ToV4InSingleLoad() throws IOException {
         String v1Json = """
             {
               "version": 1,
@@ -195,7 +192,7 @@ class LeagueStoreTest {
         Files.writeString(LEAGUE_FILE, v1Json);
 
         League loaded = store.load();
-        assertEquals(3, loaded.version());
+        assertEquals(4, loaded.version());
         assertTrue(loaded.fields().isEmpty());
         assertNull(loaded.schedule());
     }

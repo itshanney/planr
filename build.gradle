@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'org.leagueplan'
-version = '1.0.0'
+version = '0.4.0'
 
 java {
     toolchain {
@@ -34,6 +34,8 @@ test {
     systemProperty 'user.home', "${buildDir}/test-home"
     // Tests share a single file path, so parallel execution would cause interference.
     maxParallelForks = 1
+    // OR-Tools native libraries require more heap than the default 512m.
+    jvmArgs '-Xmx1g'
 }
 
 application {

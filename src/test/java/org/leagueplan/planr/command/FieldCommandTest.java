@@ -209,25 +209,32 @@ class FieldCommandTest extends CommandTestBase {
     class Delete {
 
         @Test
-        @DisplayName("exits 0 and shows zero window count when field has no windows")
-        void successWithNoWindows() {
+        @DisplayName("exits 0 and shows 0 blocks and 0 overrides when field has none")
+        void successWithNone() {
             execute("field", "add", "Riverside Park");
             int exit = execute("field", "delete", "Riverside Park");
             assertEquals(0, exit);
-            assertTrue(stdout().contains("0 availability window(s) deleted"));
+            String out = stdout();
+            assertTrue(out.contains("0 block(s)"));
+            assertTrue(out.contains("0 override(s)"));
         }
 
         @Test
-        @DisplayName("exits 0 and reports the correct cascade-deleted window count")
-        void successWithWindowsCascades() {
+        @DisplayName("reports the correct cascade-deleted block and override counts")
+        void successWithBlocksAndOverridesCascades() {
             execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Sunday", "--start", "09:00", "--end", "12:00");
+            execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
+            execute("field", "block", "add", "Riverside Park",
+                "--date", "2026-06-07", "--start", "10:00", "--end", "12:00");
+            execute("field", "block", "add", "Riverside Park",
+                "--date", "2026-06-14", "--start", "10:00", "--end", "12:00");
+            execute("field", "override", "add", "Riverside Park",
+                "--date", "2026-06-21", "--start", "09:00", "--end", "14:00");
             int exit = execute("field", "delete", "Riverside Park");
             assertEquals(0, exit);
-            assertTrue(stdout().contains("2 availability window(s) deleted"));
+            String out = stdout();
+            assertTrue(out.contains("2 block(s)"));
+            assertTrue(out.contains("1 override(s)"));
         }
 
         @Test
@@ -283,14 +290,15 @@ class FieldCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("shows NAME, ADDRESS, and WINDOWS column headers")
+        @DisplayName("shows NAME, ADDRESS, BLOCKS, and OVERRIDES column headers")
         void showsColumnHeaders() {
             execute("field", "add", "Riverside Park");
             execute("field", "list");
             String out = stdout();
             assertTrue(out.contains("NAME"));
             assertTrue(out.contains("ADDRESS"));
-            assertTrue(out.contains("WINDOWS"));
+            assertTrue(out.contains("BLOCKS"));
+            assertTrue(out.contains("OVERRIDES"));
         }
 
         @Test
@@ -310,8 +318,8 @@ class FieldCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("shows window count as 0 before any windows are added")
-        void showsZeroWindowCountInitially() {
+        @DisplayName("shows 0 block and override counts before any are added")
+        void showsZeroCountsInitially() {
             execute("field", "add", "Riverside Park");
             execute("field", "list");
             assertTrue(stdout().lines()
@@ -320,13 +328,14 @@ class FieldCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("window count reflects windows added to the field")
-        void windowCountUpdatesAfterWindowAdd() {
+        @DisplayName("block count reflects blocks added to the field")
+        void blockCountUpdatesAfterBlockAdd() {
             execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Sunday", "--start", "09:00", "--end", "12:00");
+            execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
+            execute("field", "block", "add", "Riverside Park",
+                "--date", "2026-06-07", "--start", "10:00", "--end", "12:00");
+            execute("field", "block", "add", "Riverside Park",
+                "--date", "2026-06-14", "--start", "10:00", "--end", "12:00");
             execute("field", "list");
             assertTrue(stdout().lines()
                 .filter(l -> l.contains("Riverside Park"))
@@ -338,557 +347,6 @@ class FieldCommandTest extends CommandTestBase {
         void exitsOnCorruptedData() throws IOException {
             corruptLeagueFile();
             assertEquals(2, execute("field", "list"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // field window add
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("field window add")
-    class WindowAdd {
-
-        @Test
-        @DisplayName("exits 0 and prints confirmation without a division restriction")
-        void successUnrestricted() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("#1"));
-            assertTrue(stdout().contains("Riverside Park"));
-            assertTrue(stdout().contains("Saturday"));
-            assertTrue(stdout().contains("09:00"));
-            assertTrue(stdout().contains("17:00"));
-            assertTrue(stdout().contains("all divisions"));
-        }
-
-        @Test
-        @DisplayName("exits 0 and prints division label when --division is supplied")
-        void successWithDivisionRestriction() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00", "--division", "Majors");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("Majors only"));
-        }
-
-        @Test
-        @DisplayName("accepts a 3-letter day abbreviation")
-        void acceptsThreeLetterAbbreviation() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Sat", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("Saturday"));
-        }
-
-        @Test
-        @DisplayName("accepts a full day name case-insensitively")
-        void acceptsFullDayNameCaseInsensitively() {
-            execute("field", "add", "Riverside Park");
-            assertEquals(0, execute("field", "window", "add", "Riverside Park",
-                "--day", "SATURDAY", "--start", "09:00", "--end", "17:00"));
-        }
-
-        @Test
-        @DisplayName("window number increments with each add")
-        void windowNumberIncrementsWithEachAdd() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Sunday", "--start", "09:00", "--end", "12:00");
-            assertTrue(stdout().contains("#2"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when field does not exist")
-        void failsWhenFieldNotFound() {
-            int exit = execute("field", "window", "add", "NonExistent",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when day name is invalid")
-        void failsOnInvalidDay() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Weekday", "--start", "09:00", "--end", "17:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("Invalid day"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when start time format is invalid")
-        void failsOnInvalidStartTime() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "9am", "--end", "17:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("Invalid time"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when end time format is invalid")
-        void failsOnInvalidEndTime() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "5pm");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("Invalid time"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when end time equals start time")
-        void failsWhenEndEqualsStart() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "09:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("End time must be after start time"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when end time is before start time")
-        void failsWhenEndBeforeStart() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "17:00", "--end", "09:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("End time must be after start time"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when the specified division does not exist")
-        void failsWhenDivisionNotFound() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00",
-                "--division", "NonExistent");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 2 on corrupted league data")
-        void exitsOnCorruptedData() throws IOException {
-            corruptLeagueFile();
-            int exit = execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(2, exit);
-            assertTrue(stderr().contains("Failed to access league data"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // field window edit
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("field window edit")
-    class WindowEdit {
-
-        @Test
-        @DisplayName("exits 0 and prints confirmation when updating the day")
-        void updatesDaySuccessfully() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1", "--day", "Sunday");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("updated"));
-        }
-
-        @Test
-        @DisplayName("updated day appears in list")
-        void updatedDayAppearsInList() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "edit", "Riverside Park", "1", "--day", "Sunday");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("Sunday"));
-            assertFalse(stdout().contains("Saturday"));
-        }
-
-        @Test
-        @DisplayName("exits 0 when updating start time only")
-        void updatesStartTimeSuccessfully() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, execute("field", "window", "edit", "Riverside Park", "1", "--start", "10:00"));
-        }
-
-        @Test
-        @DisplayName("exits 0 when updating end time only")
-        void updatesEndTimeSuccessfully() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, execute("field", "window", "edit", "Riverside Park", "1", "--end", "18:00"));
-        }
-
-        @Test
-        @DisplayName("exits 0 when setting a division restriction")
-        void setsDivisionRestriction() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1", "--division", "Majors");
-            assertEquals(0, exit);
-        }
-
-        @Test
-        @DisplayName("division label appears in list after setting restriction")
-        void divisionLabelAppearsInListAfterSettingRestriction() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "edit", "Riverside Park", "1", "--division", "Majors");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("Majors"));
-        }
-
-        @Test
-        @DisplayName("--clear-division removes a previously set restriction")
-        void clearDivisionRemovesPreviousRestriction() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00", "--division", "Majors");
-            execute("field", "window", "edit", "Riverside Park", "1", "--clear-division");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("All divisions"));
-            assertFalse(stdout().contains("Majors"));
-        }
-
-        @Test
-        @DisplayName("unspecified fields are preserved from the existing window")
-        void preservesExistingValuesForUnspecifiedFields() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "edit", "Riverside Park", "1", "--day", "Sunday");
-            execute("field", "window", "list", "Riverside Park");
-            String out = stdout();
-            assertTrue(out.contains("Sunday"));
-            assertTrue(out.contains("09:00"));
-            assertTrue(out.contains("17:00"));
-        }
-
-        @Test
-        @DisplayName("matches field name case-insensitively")
-        void matchesFieldNameCaseInsensitively() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, execute("field", "window", "edit", "RIVERSIDE PARK", "1", "--day", "Sunday"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when field does not exist")
-        void failsWhenFieldNotFound() {
-            int exit = execute("field", "window", "edit", "NonExistent", "1", "--day", "Sunday");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when window number is out of range")
-        void failsWhenWindowNumberOutOfRange() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "5", "--day", "Sunday");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when window number is 0")
-        void failsWhenWindowNumberIsZero() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "0", "--day", "Sunday");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when no options are provided")
-        void failsWhenNoOptionsProvided() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("At least one of"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when --division and --clear-division are both supplied")
-        void failsWhenBothDivisionFlagsProvided() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1",
-                "--division", "Majors", "--clear-division");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("cannot be used together"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when new end time would not be after effective start time")
-        void failsWhenEffectiveEndNotAfterStart() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1", "--end", "08:00");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("End time must be after start time"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when the specified division does not exist")
-        void failsWhenDivisionNotFound() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "edit", "Riverside Park", "1",
-                "--division", "NonExistent");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 2 on corrupted league data")
-        void exitsOnCorruptedData() throws IOException {
-            corruptLeagueFile();
-            int exit = execute("field", "window", "edit", "Riverside Park", "1", "--day", "Sunday");
-            assertEquals(2, exit);
-            assertTrue(stderr().contains("Failed to access league data"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // field window delete
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("field window delete")
-    class WindowDelete {
-
-        @Test
-        @DisplayName("exits 0 and prints confirmation")
-        void success() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "delete", "Riverside Park", "1");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("deleted"));
-        }
-
-        @Test
-        @DisplayName("deleted window is absent from list")
-        void deletedWindowAbsentFromList() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "delete", "Riverside Park", "1");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("No availability windows"));
-        }
-
-        @Test
-        @DisplayName("remaining windows shift up after a delete")
-        void remainingWindowsShiftUp() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Sunday", "--start", "09:00", "--end", "12:00");
-            execute("field", "window", "delete", "Riverside Park", "1");
-            execute("field", "window", "list", "Riverside Park");
-            String out = stdout();
-            assertFalse(out.contains("Saturday"));
-            assertTrue(out.contains("Sunday"));
-            assertTrue(out.lines().anyMatch(l -> l.startsWith("1")));
-        }
-
-        @Test
-        @DisplayName("matches field name case-insensitively")
-        void matchesFieldNameCaseInsensitively() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            assertEquals(0, execute("field", "window", "delete", "RIVERSIDE PARK", "1"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when field does not exist")
-        void failsWhenFieldNotFound() {
-            int exit = execute("field", "window", "delete", "NonExistent", "1");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when window number exceeds the list size")
-        void failsWhenWindowNumberTooHigh() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "delete", "Riverside Park", "5");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when window number is 0")
-        void failsWhenWindowNumberIsZero() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            int exit = execute("field", "window", "delete", "Riverside Park", "0");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when field exists but has no windows")
-        void failsWhenFieldHasNoWindows() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "delete", "Riverside Park", "1");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 2 on corrupted league data")
-        void exitsOnCorruptedData() throws IOException {
-            corruptLeagueFile();
-            int exit = execute("field", "window", "delete", "Riverside Park", "1");
-            assertEquals(2, exit);
-            assertTrue(stderr().contains("Failed to access league data"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // field window list
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("field window list")
-    class WindowList {
-
-        @Test
-        @DisplayName("exits 0 and shows guidance when field has no windows")
-        void noWindowsShowsMessage() {
-            execute("field", "add", "Riverside Park");
-            int exit = execute("field", "window", "list", "Riverside Park");
-            assertEquals(0, exit);
-            assertTrue(stdout().contains("No availability windows"));
-        }
-
-        @Test
-        @DisplayName("shows column headers when windows exist")
-        void showsColumnHeaders() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "list", "Riverside Park");
-            String out = stdout();
-            assertTrue(out.contains("DAY"));
-            assertTrue(out.contains("START"));
-            assertTrue(out.contains("END"));
-            assertTrue(out.contains("DIVISION"));
-        }
-
-        @Test
-        @DisplayName("shows 'All divisions' for an unrestricted window")
-        void showsAllDivisionsForUnrestrictedWindow() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("All divisions"));
-        }
-
-        @Test
-        @DisplayName("shows division name for a restricted window")
-        void showsDivisionNameForRestrictedWindow() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00", "--division", "Majors");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("Majors"));
-        }
-
-        @Test
-        @DisplayName("shows [deleted] for a window whose division was removed")
-        void showsDeletedForOrphanedWindow() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00", "--division", "Majors");
-            execute("division", "delete", "Majors");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("[deleted]"));
-        }
-
-        @Test
-        @DisplayName("prints a warning when orphaned windows exist")
-        void printsWarningForOrphanedWindows() {
-            execute("division", "add", "Majors", "--duration", "120");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00", "--division", "Majors");
-            execute("division", "delete", "Majors");
-            execute("field", "window", "list", "Riverside Park");
-            assertTrue(stdout().contains("Warning"));
-        }
-
-        @Test
-        @DisplayName("shows correct 1-based index numbers for each window")
-        void showsCorrectIndexNumbers() {
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "17:00");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Sunday", "--start", "09:00", "--end", "12:00");
-            execute("field", "window", "list", "Riverside Park");
-            String out = stdout();
-            assertTrue(out.lines().anyMatch(l -> l.trim().startsWith("1")));
-            assertTrue(out.lines().anyMatch(l -> l.trim().startsWith("2")));
-        }
-
-        @Test
-        @DisplayName("exits 1 when field does not exist")
-        void failsWhenFieldNotFound() {
-            int exit = execute("field", "window", "list", "NonExistent");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("not found"));
-        }
-
-        @Test
-        @DisplayName("exits 2 on corrupted league data")
-        void exitsOnCorruptedData() throws IOException {
-            corruptLeagueFile();
-            int exit = execute("field", "window", "list", "Riverside Park");
-            assertEquals(2, exit);
-            assertTrue(stderr().contains("Failed to access league data"));
         }
     }
 }

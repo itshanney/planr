@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -103,7 +102,7 @@ public class ScheduleGameCommand implements Runnable {
                 LocalTime newStart = null;
                 if (newStartStr != null) {
                     try {
-                        newStart = LocalTime.parse(newStartStr, FieldWindowCommand.TIME_FORMAT);
+                        newStart = LocalTime.parse(newStartStr, FieldOverrideCommand.TIME_FORMAT);
                     } catch (DateTimeParseException e) {
                         System.err.printf("Error: Invalid time \"%s\". Use HH:mm format.%n", newStartStr);
                         return 1;

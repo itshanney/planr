@@ -21,7 +21,7 @@ class DivisionTest {
     @BeforeEach
     void setUp() {
         blueJays = new Team(TEAM_A, "Blue Jays");
-        division = new Division(DIV_ID, "Majors", 120, List.of(blueJays));
+        division = new Division(DIV_ID, "Majors", 120, 0, List.of(blueJays));
     }
 
     // --- findTeam ---

@@ -18,12 +18,11 @@ class ScheduleCommandTest extends CommandTestBase {
     //   Season: 2026-06-01 to 2026-06-30 (4 Saturdays → plenty of slots)
 
     private void addMinimalLeague() {
-        execute("division", "add", "Majors", "--duration", "60");
+        execute("division", "add", "Majors", "--duration", "60", "--target", "10");
         execute("team", "add", "Majors", "Blue Jays");
         execute("team", "add", "Majors", "Cardinals");
         execute("field", "add", "Riverside Park");
-        execute("field", "window", "add", "Riverside Park",
-            "--day", "Saturday", "--start", "09:00", "--end", "18:00");
+        execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
     }
 
     private int generateDraft() {
@@ -68,11 +67,10 @@ class ScheduleCommandTest extends CommandTestBase {
         @Test
         @DisplayName("exits 1 when the only division has fewer than 2 teams")
         void failsWhenDivisionHasOnlyOneTeam() {
-            execute("division", "add", "Majors", "--duration", "60");
+            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
             execute("team", "add", "Majors", "Blue Jays");
             execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "18:00");
+            execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
             int exit = execute("schedule", "generate",
                 "--start", "2026-06-01", "--end", "2026-06-30");
             assertEquals(1, exit);
@@ -80,16 +78,17 @@ class ScheduleCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("exits 1 when no fields have any availability windows")
-        void failsWhenNoFieldHasWindows() {
-            execute("division", "add", "Majors", "--duration", "60");
+        @DisplayName("exits 1 when sunrise/sunset config has not been set")
+        void failsWhenNoConfigSet() {
+            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
             execute("team", "add", "Majors", "Blue Jays");
             execute("team", "add", "Majors", "Cardinals");
             execute("field", "add", "Riverside Park");
+            // config NOT set — sunrise/sunset are null
             int exit = execute("schedule", "generate",
                 "--start", "2026-06-01", "--end", "2026-06-30");
             assertEquals(1, exit);
-            assertTrue(stderr().contains("requires at least one division"));
+            assertTrue(stderr().contains("config"));
         }
 
         @Test
@@ -162,46 +161,18 @@ class ScheduleCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("exits 1 when a field window references a deleted division")
-        void failsOnOrphanedWindowReference() {
-            execute("division", "add", "Majors", "--duration", "60");
-            execute("division", "add", "AAA", "--duration", "60");
-            execute("team", "add", "Majors", "Blue Jays");
-            execute("team", "add", "Majors", "Cardinals");
-            execute("team", "add", "AAA", "Red Sox");
-            execute("team", "add", "AAA", "Yankees");
-            execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "18:00",
-                "--division", "AAA");
-            // Delete the AAA division — this leaves the window's divisionId orphaned
-            execute("team", "delete", "AAA", "Red Sox");
-            execute("team", "delete", "AAA", "Yankees");
-            execute("division", "delete", "AAA");
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("deleted divisions"));
-        }
-
-        @Test
         @DisplayName("exits 1 when there are not enough slots to cover the fixtures")
         void failsWhenInsufficientSlots() {
-            // 4 teams → 12 games, but window only covers a single 60-min slot on one Saturday
-            execute("division", "add", "Majors", "--duration", "60");
+            // 4 teams → 12 games; config 09:00-10:00 → 1 slot/day; 5-day season → 5 slots < 12
+            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
             execute("team", "add", "Majors", "Team A");
             execute("team", "add", "Majors", "Team B");
             execute("team", "add", "Majors", "Team C");
             execute("team", "add", "Majors", "Team D");
             execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "10:00");
-            // Only 1 slot per Saturday (60-min game + 15-min buffer = 75 min; window is 60 min → 1 slot)
-            // Actually 09:00 to 10:00 is 60 min, game is 60 min, so 09:00+60 = 10:00 which equals endTime
-            // The condition is startTime + duration <= endTime, so this gives exactly 1 slot
-            // 4 Saturdays in June → 4 slots total, but 12 games needed
+            execute("config", "set", "--sunrise", "09:00", "--sunset", "10:00");
             int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+                "--start", "2026-06-01", "--end", "2026-06-05");
             assertEquals(1, exit);
             assertTrue(stderr().contains("games required"));
         }
@@ -391,15 +362,14 @@ class ScheduleCommandTest extends CommandTestBase {
         @Test
         @DisplayName("filters to only matching division when --division is specified")
         void filtersByDivision() {
-            execute("division", "add", "Majors", "--duration", "60");
-            execute("division", "add", "AAA", "--duration", "60");
+            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
+            execute("division", "add", "AAA", "--duration", "60", "--target", "10");
             execute("team", "add", "Majors", "Blue Jays");
             execute("team", "add", "Majors", "Cardinals");
             execute("team", "add", "AAA", "Red Sox");
             execute("team", "add", "AAA", "Yankees");
             execute("field", "add", "Riverside Park");
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "18:00");
+            execute("config", "set", "--sunrise", "09:00", "--sunset", "18:00");
             execute("schedule", "generate", "--start", "2026-06-01", "--end", "2026-06-30");
             execute("schedule", "view", "--division", "Majors");
             String out = stdout();
@@ -662,14 +632,7 @@ class ScheduleCommandTest extends CommandTestBase {
         @Test
         @DisplayName("conflict warning is printed to stderr when same field and date overlap")
         void conflictWarningPrintedWhenFieldOverlaps() {
-            // Schedule 2 games on the same day/field at adjacent slots that would overlap
-            // after override moves one game into the other's time window.
-            // The easiest way: add a second field window on same day at the same start time,
-            // then override game 1 to use the exact same time as game 2 on the same field.
             addMinimalLeague();
-            // Add extra window so the solver has room and places both games on a Saturday
-            execute("field", "window", "add", "Riverside Park",
-                "--day", "Saturday", "--start", "09:00", "--end", "18:00");
             generateDraft();
             provideStdinAndExecute("yes\n", "schedule", "finalize");
 

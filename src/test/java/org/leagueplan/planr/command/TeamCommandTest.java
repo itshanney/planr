@@ -15,7 +15,7 @@ class TeamCommandTest extends CommandTestBase {
     // so the data dir is clean before this runs.
     @BeforeEach
     void createDivision() {
-        execute("division", "add", "Majors", "--duration", "120");
+        execute("division", "add", "Majors", "--duration", "120", "--target", "10");
     }
 
     // -------------------------------------------------------------------------
@@ -69,7 +69,7 @@ class TeamCommandTest extends CommandTestBase {
         @Test
         @DisplayName("allows the same team name in different divisions")
         void sameTeamNameAllowedAcrossDivisions() {
-            execute("division", "add", "AAA", "--duration", "90");
+            execute("division", "add", "AAA", "--duration", "90", "--target", "10");
             execute("team", "add", "Majors", "Blue Jays");
             int exit = execute("team", "add", "AAA", "Blue Jays");
             assertEquals(0, exit);

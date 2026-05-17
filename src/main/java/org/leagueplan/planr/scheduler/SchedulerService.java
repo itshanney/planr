@@ -8,10 +8,12 @@ import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
 import com.google.ortools.sat.Literal;
-import org.leagueplan.planr.model.AvailabilityWindow;
 import org.leagueplan.planr.model.Division;
 import org.leagueplan.planr.model.Field;
+import org.leagueplan.planr.model.FieldBlock;
+import org.leagueplan.planr.model.FieldDateOverride;
 import org.leagueplan.planr.model.League;
+import org.leagueplan.planr.model.LeagueConfig;
 import org.leagueplan.planr.model.ScheduledGame;
 
 import java.time.LocalDate;
@@ -121,16 +123,40 @@ public class SchedulerService {
         }
         if (slotsByDiv.isEmpty()) return slotsByDiv;
 
+        LeagueConfig config = league.config();
+        if (config == null || config.sunriseTime() == null || config.sunsetTime() == null) {
+            return slotsByDiv; // no open window configured — all slot lists remain empty
+        }
+
         for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
-            var dow = date.getDayOfWeek();
+            final LocalDate currentDate = date;
             for (Field field : league.fields()) {
-                for (AvailabilityWindow window : field.windows()) {
-                    if (window.dayOfWeek() != dow) continue;
-                    for (UUID divId : applicableDivisions(window, slotsByDiv.keySet())) {
-                        int duration = divisionDuration(league, divId);
-                        LocalTime slotStart = window.startTime();
-                        while (!slotStart.plusMinutes(duration).isAfter(window.endTime())) {
-                            slotsByDiv.get(divId).add(new Slot(date, field.id(), field.name(), slotStart));
+                // Effective open window: per-date override takes priority over league defaults.
+                LocalTime openStart = config.sunriseTime();
+                LocalTime openEnd = config.sunsetTime();
+                for (FieldDateOverride override : field.dateOverrides()) {
+                    if (override.date().equals(currentDate)) {
+                        openStart = override.openStart();
+                        openEnd = override.openEnd();
+                        break;
+                    }
+                }
+
+                // Collect blocks for this field on this date.
+                List<FieldBlock> dateBlocks = field.blocks().stream()
+                    .filter(b -> b.date().equals(currentDate))
+                    .toList();
+
+                // Available sub-windows after subtracting blocks from open window.
+                List<LocalTime[]> available = subtractBlocks(openStart, openEnd, dateBlocks);
+
+                for (UUID divId : slotsByDiv.keySet()) {
+                    int duration = divisionDuration(league, divId);
+                    for (LocalTime[] window : available) {
+                        LocalTime slotStart = window[0];
+                        while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
+                            slotsByDiv.get(divId).add(
+                                new Slot(currentDate, field.id(), field.name(), slotStart));
                             slotStart = slotStart.plusMinutes(GRID_MINUTES);
                         }
                     }
@@ -140,13 +166,31 @@ public class SchedulerService {
         return slotsByDiv;
     }
 
-    private List<UUID> applicableDivisions(AvailabilityWindow window, java.util.Set<UUID> activeDivisions) {
-        if (window.divisionId() == null) {
-            return new ArrayList<>(activeDivisions);
+    private List<LocalTime[]> subtractBlocks(LocalTime openStart, LocalTime openEnd,
+            List<FieldBlock> blocks) {
+        List<LocalTime[]> available = new ArrayList<>();
+        available.add(new LocalTime[]{openStart, openEnd});
+        for (FieldBlock block : blocks) {
+            List<LocalTime[]> remaining = new ArrayList<>();
+            for (LocalTime[] window : available) {
+                LocalTime wStart = window[0];
+                LocalTime wEnd = window[1];
+                boolean blockOverlaps = block.startTime().isBefore(wEnd)
+                    && block.endTime().isAfter(wStart);
+                if (!blockOverlaps) {
+                    remaining.add(window);
+                    continue;
+                }
+                if (block.startTime().isAfter(wStart)) {
+                    remaining.add(new LocalTime[]{wStart, block.startTime()});
+                }
+                if (block.endTime().isBefore(wEnd)) {
+                    remaining.add(new LocalTime[]{block.endTime(), wEnd});
+                }
+            }
+            available = remaining;
         }
-        return activeDivisions.contains(window.divisionId())
-            ? List.of(window.divisionId())
-            : List.of();
+        return available;
     }
 
     private int divisionDuration(League league, UUID divId) {
@@ -185,7 +229,7 @@ public class SchedulerService {
 
         return "Error: Cannot generate a valid schedule. Insufficient field availability:%n"
             + lines
-            + "%nAdd more field availability windows or extend the season date range.";
+            + "%nAdd more field availability or extend the season date range.";
     }
 
     // --- CP-SAT model construction and solve ---
@@ -283,7 +327,7 @@ public class SchedulerService {
         if (status == CpSolverStatus.INFEASIBLE) {
             return ScheduleResult.failure(
                 "Error: Cannot generate a valid schedule given the current constraints. "
-                + "Try adding more field availability windows or extending the season date range.");
+                + "Try adding more field availability or extending the season date range.");
         }
         if (status == CpSolverStatus.UNKNOWN) {
             return ScheduleResult.failure(

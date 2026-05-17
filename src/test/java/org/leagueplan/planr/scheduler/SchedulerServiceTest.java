@@ -1,15 +1,14 @@
 package org.leagueplan.planr.scheduler;
 
-import org.leagueplan.planr.model.AvailabilityWindow;
 import org.leagueplan.planr.model.Division;
 import org.leagueplan.planr.model.Field;
 import org.leagueplan.planr.model.League;
+import org.leagueplan.planr.model.LeagueConfig;
 import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.Team;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -21,20 +20,22 @@ import static org.junit.jupiter.api.Assertions.*;
  * Integration tests for SchedulerService.generate().
  *
  * All tests use small leagues (2-4 teams per division) so the solver completes in milliseconds.
- * The key behavioral guarantees checked are correctness of constraints, not solver performance.
+ * Fields are open every day between sunrise and sunset; no day-of-week windows exist in v2.
  */
 class SchedulerServiceTest {
 
     private static final LocalDate SEASON_START = LocalDate.of(2026, 6, 1);
-    // June–August: 13 Saturdays (June 6,13,20,27; July 4,11,18,25; Aug 1,8,15,22,29).
-    // With C3 (at most 1 game per team per day) and 4 teams: 2 games/Saturday max.
-    // 13 Saturdays × 2 games = 26 slots → covers a 4-team division (12 games).
-    // 3-team: 1 game/Saturday max (only 3 teams, 1 sits out) → 13 slots → covers 6 games.
+    // June–August: 91 days, 33 slots/day with 09:00-18:00 config and 15-min grid.
     private static final LocalDate SEASON_END   = LocalDate.of(2026, 8, 31);
-    // Short season used only in infeasibility tests where total slot count must be < fixture count.
-    private static final LocalDate SHORT_SEASON_END = LocalDate.of(2026, 6, 30);
+    // Short 7-day season used in infeasibility tests: narrow config (1 slot/day) × 7 days = 7 slots < 12.
+    private static final LocalDate SHORT_SEASON_END = LocalDate.of(2026, 6, 7);
 
-    // Window 09:00-18:00, 60-min games, 15-min grid → 33 slots per Saturday per field.
+    // Normal config: fields open 09:00–18:00 every day.
+    private static final LeagueConfig CONFIG = new LeagueConfig(
+        LocalTime.of(9, 0), LocalTime.of(18, 0), null, null);
+    // Narrow config: fields open 09:00–10:00 → exactly 1 slot/day for 60-min games.
+    private static final LeagueConfig NARROW_CONFIG = new LeagueConfig(
+        LocalTime.of(9, 0), LocalTime.of(10, 0), null, null);
 
     // ---------------------------------------------------------------------------
     // League builder helpers
@@ -45,62 +46,52 @@ class SchedulerServiceTest {
     }
 
     private static Division division(String name, int duration, Team... teams) {
-        return new Division(UUID.randomUUID(), name, duration, List.of(teams));
+        return new Division(UUID.randomUUID(), name, duration, 0, List.of(teams));
     }
 
-    private static AvailabilityWindow window(DayOfWeek day, String start, String end) {
-        return new AvailabilityWindow(UUID.randomUUID(), day,
-            LocalTime.parse(start), LocalTime.parse(end), null);
+    private static Field field(String name) {
+        return new Field(UUID.randomUUID(), name, null, List.of(), List.of());
     }
 
-    private static AvailabilityWindow windowForDiv(DayOfWeek day, String start, String end, UUID divisionId) {
-        return new AvailabilityWindow(UUID.randomUUID(), day,
-            LocalTime.parse(start), LocalTime.parse(end), divisionId);
+    private static League league(LeagueConfig config, List<Division> divisions, List<Field> fields) {
+        return new League(4, config, divisions, fields, null);
     }
 
-    private static Field field(String name, AvailabilityWindow... windows) {
-        return new Field(UUID.randomUUID(), name, null, List.of(windows));
-    }
-
-    private static League league(List<Division> divisions, List<Field> fields) {
-        return new League(3, divisions, fields, null);
-    }
-
-    /** Build a minimal 2-team league with 1 Saturday field. 2 games required. */
+    /** Build a minimal 2-team league. 2 games required. */
     private static League twoTeamLeague() {
         Team t1 = team("Blue Jays");
         Team t2 = team("Cardinals");
         Division div = division("Majors", 60, t1, t2);
-        Field f = field("Riverside Park", window(DayOfWeek.SATURDAY, "09:00", "18:00"));
-        return league(List.of(div), List.of(f));
+        Field f = field("Riverside Park");
+        return league(CONFIG, List.of(div), List.of(f));
     }
 
-    /** Build a 4-team league. 12 games (4*3) required. */
+    /** Build a 4-team league. 12 games (4×3) required. */
     private static League fourTeamLeague() {
         Team t1 = team("Blue Jays");
         Team t2 = team("Cardinals");
         Team t3 = team("Red Sox");
         Team t4 = team("Yankees");
         Division div = division("Majors", 60, t1, t2, t3, t4);
-        Field f = field("Riverside Park", window(DayOfWeek.SATURDAY, "09:00", "18:00"));
-        return league(List.of(div), List.of(f));
+        Field f = field("Riverside Park");
+        return league(CONFIG, List.of(div), List.of(f));
     }
 
-    /** Build a 3-team league (odd count). 6 games (3*2) required. */
+    /** Build a 3-team league (odd count). 6 games (3×2) required. */
     private static League threeTeamLeague() {
         Team t1 = team("Blue Jays");
         Team t2 = team("Cardinals");
         Team t3 = team("Red Sox");
         Division div = division("Majors", 60, t1, t2, t3);
-        Field f = field("Riverside Park", window(DayOfWeek.SATURDAY, "09:00", "18:00"));
-        return league(List.of(div), List.of(f));
+        Field f = field("Riverside Park");
+        return league(CONFIG, List.of(div), List.of(f));
     }
 
     private ScheduleResult generate(League l) {
         return new SchedulerService().generate(l, SEASON_START, SEASON_END);
     }
 
-    /** Uses the short (June-only) season where 4 Saturdays → 4 slots — triggers pre-solve infeasibility for ≥5 fixtures. */
+    /** Uses the short (7-day) season where narrow config produces 7 slots — triggers pre-solve infeasibility for 4+ teams. */
     private ScheduleResult generateShort(League l) {
         return new SchedulerService().generate(l, SEASON_START, SHORT_SEASON_END);
     }
@@ -144,8 +135,6 @@ class SchedulerServiceTest {
         assertInstanceOf(ScheduleResult.Success.class, result);
         List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
 
-        // For every (home, away) ordered pair, count occurrences.
-        // Each should appear exactly once.
         for (int i = 0; i < games.size(); i++) {
             ScheduledGame gi = games.get(i);
             long count = games.stream()
@@ -249,60 +238,6 @@ class SchedulerServiceTest {
         }
     }
 
-    @Test
-    @DisplayName("all games are scheduled on a day with a matching field window")
-    void allGamesScheduledOnWindowDay() {
-        ScheduleResult result = generate(twoTeamLeague());
-        assertInstanceOf(ScheduleResult.Success.class, result);
-        List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
-
-        // Window is Saturday only, so all games must be on Saturday.
-        for (ScheduledGame g : games) {
-            assertEquals(DayOfWeek.SATURDAY, g.date().getDayOfWeek(),
-                "Game on " + g.date() + " is not on Saturday");
-        }
-    }
-
-    // ---------------------------------------------------------------------------
-    // Division-restricted windows
-    // ---------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("games respect division-restricted windows — restricted window is used only for its division")
-    void divisionRestrictedWindowsRespected() {
-        Team majorsT1 = team("Blue Jays");
-        Team majorsT2 = team("Cardinals");
-        Team aaaT1    = team("Red Sox");
-        Team aaaT2    = team("Yankees");
-
-        Division majors = division("Majors", 60, majorsT1, majorsT2);
-        Division aaa    = division("AAA",    60, aaaT1,    aaaT2);
-
-        // Saturday window restricted to Majors only.
-        // Sunday window restricted to AAA only.
-        AvailabilityWindow majorsWindow =
-            windowForDiv(DayOfWeek.SATURDAY, "09:00", "18:00", majors.id());
-        AvailabilityWindow aaaWindow =
-            windowForDiv(DayOfWeek.SUNDAY, "09:00", "18:00", aaa.id());
-        Field f = field("Riverside Park", majorsWindow, aaaWindow);
-
-        League l = league(List.of(majors, aaa), List.of(f));
-        ScheduleResult result = generate(l);
-
-        assertInstanceOf(ScheduleResult.Success.class, result);
-        List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
-
-        for (ScheduledGame g : games) {
-            if (g.divisionName().equals("Majors")) {
-                assertEquals(DayOfWeek.SATURDAY, g.date().getDayOfWeek(),
-                    "Majors game should only be on Saturday");
-            } else {
-                assertEquals(DayOfWeek.SUNDAY, g.date().getDayOfWeek(),
-                    "AAA game should only be on Sunday");
-            }
-        }
-    }
-
     // ---------------------------------------------------------------------------
     // Multi-division schedules
     // ---------------------------------------------------------------------------
@@ -314,9 +249,9 @@ class SchedulerServiceTest {
         Team a1 = team("Red Sox"),   a2 = team("Yankees");
         Division majors = division("Majors", 60, m1, m2);
         Division aaa    = division("AAA",    60, a1, a2);
-        Field f = field("Riverside Park", window(DayOfWeek.SATURDAY, "09:00", "18:00"));
+        Field f = field("Riverside Park");
 
-        League l = league(List.of(majors, aaa), List.of(f));
+        League l = league(CONFIG, List.of(majors, aaa), List.of(f));
         ScheduleResult result = generate(l);
 
         assertInstanceOf(ScheduleResult.Success.class, result);
@@ -340,14 +275,12 @@ class SchedulerServiceTest {
     @Test
     @DisplayName("returns Failure when there are fewer slots than fixtures for a division")
     void returnsFailureWhenInsufficientSlots() {
-        // 4 teams → 12 games needed. Window 09:00-10:00 → exactly 1 slot per Saturday.
-        // Short season (June only) → 4 Saturdays → 4 slots < 12 → pre-solve catches infeasibility.
+        // 4 teams → 12 games needed. Narrow config (09:00-10:00) → 1 slot/day.
+        // Short season (7 days) → 7 slots < 12 → pre-solve catches infeasibility.
         Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
         Division div = division("Majors", 60, t1, t2, t3, t4);
-        Field f = field("Riverside Park",
-            new AvailabilityWindow(UUID.randomUUID(), DayOfWeek.SATURDAY,
-                LocalTime.of(9, 0), LocalTime.of(10, 0), null));
-        League l = league(List.of(div), List.of(f));
+        Field f = field("Riverside Park");
+        League l = league(NARROW_CONFIG, List.of(div), List.of(f));
 
         ScheduleResult result = generateShort(l);
         assertInstanceOf(ScheduleResult.Failure.class, result);
@@ -358,10 +291,8 @@ class SchedulerServiceTest {
     void failureMessageNamesInfeasibleDivision() {
         Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
         Division div = division("Majors", 60, t1, t2, t3, t4);
-        Field f = field("Riverside Park",
-            new AvailabilityWindow(UUID.randomUUID(), DayOfWeek.SATURDAY,
-                LocalTime.of(9, 0), LocalTime.of(10, 0), null));
-        League l = league(List.of(div), List.of(f));
+        Field f = field("Riverside Park");
+        League l = league(NARROW_CONFIG, List.of(div), List.of(f));
 
         ScheduleResult result = generateShort(l);
         assertInstanceOf(ScheduleResult.Failure.class, result);
@@ -375,16 +306,14 @@ class SchedulerServiceTest {
     @Test
     @DisplayName("feasible division is listed as OK in the failure diagnostic when another division is infeasible")
     void feasibleDivisionListedAsOkInFailureDiagnostic() {
-        // Majors: infeasible (4 teams, only 4 slots in short season)
-        // AAA:    feasible  (2 teams, 4 slots ≥ 2 games needed)
+        // Majors: infeasible (4 teams → 12 games, 7 slots available)
+        // AAA:    feasible  (2 teams → 2 games, 7 slots available)
         Team m1 = team("A"), m2 = team("B"), m3 = team("C"), m4 = team("D");
         Team a1 = team("E"), a2 = team("F");
         Division majors = division("Majors", 60, m1, m2, m3, m4);
         Division aaa    = division("AAA",    60, a1, a2);
-        Field narrow = field("Narrow",
-            new AvailabilityWindow(UUID.randomUUID(), DayOfWeek.SATURDAY,
-                LocalTime.of(9, 0), LocalTime.of(10, 0), null));
-        League l = league(List.of(majors, aaa), List.of(narrow));
+        Field f = field("Narrow");
+        League l = league(NARROW_CONFIG, List.of(majors, aaa), List.of(f));
 
         ScheduleResult result = generateShort(l);
         assertInstanceOf(ScheduleResult.Failure.class, result);
