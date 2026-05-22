@@ -13,21 +13,32 @@ import static org.junit.jupiter.api.Assertions.*;
 class ScheduleCommandTest extends CommandTestBase {
 
     // Helpers to build a minimal schedulable league via CLI:
-    //   1 division ("Majors", 60-min games) with 2 teams → 2 games needed
-    //   1 field with a Saturday window 09:00-18:00
-    //   Season: 2026-06-01 to 2026-06-30 (4 Saturdays → plenty of slots)
+    //   1 division ("Majors", 60-min games, target 2) with 2 teams → 2 games needed
+    //   1 field open 07:00–20:00 daily
+    //   Season: 2026-06-01 to 2026-06-30 (plenty of slots for both phases)
 
     private void addMinimalLeague() {
-        execute("division", "add", "Majors", "--duration", "60", "--target", "10");
+        execute("division", "add", "Majors", "--duration", "60", "--target", "2");
         execute("team", "add", "Majors", "Blue Jays");
         execute("team", "add", "Majors", "Cardinals");
         execute("field", "add", "Riverside Park");
-        execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
+        execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00",
+            "--start", "2026-06-01", "--end", "2026-06-30");
     }
 
+    /** Phase 1 only: generate matchups (no confirmation prompt on first run). */
+    private int generateTeamSchedule() {
+        return execute("schedule", "generate");
+    }
+
+    /**
+     * Full two-phase draft: Phase 1 (matchups) + Phase 2 (field/time assignment).
+     * Provides "yes" stdin for both steps to handle re-runs gracefully.
+     */
     private int generateDraft() {
-        return execute("schedule", "generate",
-            "--start", "2026-06-01", "--end", "2026-06-30");
+        int exit = provideStdinAndExecute("yes\n", "schedule", "generate");
+        if (exit != 0) return exit;
+        return provideStdinAndExecute("yes\n", "schedule", "assign");
     }
 
     private void generateAndFinalizeSchedule() {
@@ -48,7 +59,7 @@ class ScheduleCommandTest extends CommandTestBase {
     }
 
     // -------------------------------------------------------------------------
-    // schedule generate
+    // schedule generate (Phase 1 — matchup / team schedule generation)
     // -------------------------------------------------------------------------
 
     @Nested
@@ -58,81 +69,56 @@ class ScheduleCommandTest extends CommandTestBase {
         @Test
         @DisplayName("exits 1 when no divisions have been added")
         void failsWhenNoDivisionsExist() {
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+            execute("config", "set", "--start", "2026-06-01", "--end", "2026-06-30");
+            int exit = execute("schedule", "generate");
             assertEquals(1, exit);
-            assertTrue(stderr().contains("requires at least one division"));
+            assertTrue(stderr().contains("At least one division"));
         }
 
         @Test
         @DisplayName("exits 1 when the only division has fewer than 2 teams")
         void failsWhenDivisionHasOnlyOneTeam() {
-            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
+            execute("division", "add", "Majors", "--duration", "60", "--target", "2");
             execute("team", "add", "Majors", "Blue Jays");
-            execute("field", "add", "Riverside Park");
-            execute("config", "set", "--sunrise", "07:00", "--sunset", "20:00");
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+            execute("config", "set", "--start", "2026-06-01", "--end", "2026-06-30");
+            int exit = execute("schedule", "generate");
             assertEquals(1, exit);
-            assertTrue(stderr().contains("requires at least one division"));
+            assertTrue(stderr().contains("At least one division"));
         }
 
         @Test
-        @DisplayName("exits 1 when sunrise/sunset config has not been set")
-        void failsWhenNoConfigSet() {
-            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
+        @DisplayName("exits 1 when season dates have not been configured")
+        void failsWhenNoSeasonDatesConfigured() {
+            execute("division", "add", "Majors", "--duration", "60", "--target", "2");
             execute("team", "add", "Majors", "Blue Jays");
             execute("team", "add", "Majors", "Cardinals");
-            execute("field", "add", "Riverside Park");
-            // config NOT set — sunrise/sunset are null
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+            // No config set — season dates are null
+            int exit = execute("schedule", "generate");
             assertEquals(1, exit);
-            assertTrue(stderr().contains("config"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when end date equals start date")
-        void failsWhenEndEqualsStart() {
-            addMinimalLeague();
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-01");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("end date must be after"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when end date is before start date")
-        void failsWhenEndBeforeStart() {
-            addMinimalLeague();
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-30", "--end", "2026-06-01");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("end date must be after"));
-        }
-
-        @Test
-        @DisplayName("exits 1 when date format is invalid")
-        void failsOnInvalidDateFormat() {
-            addMinimalLeague();
-            int exit = execute("schedule", "generate",
-                "--start", "06/01/2026", "--end", "2026-06-30");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("YYYY-MM-DD"));
+            assertTrue(stderr().contains("Season start and end dates"));
         }
 
         @Test
         @DisplayName("exits 0 and reports game count on success")
         void successReportsGameCount() {
             addMinimalLeague();
-            int exit = generateDraft();
+            int exit = generateTeamSchedule();
             assertEquals(0, exit);
             assertTrue(stdout().contains("2 games"));
             assertTrue(stdout().contains("1 division"));
         }
 
         @Test
-        @DisplayName("generates a DRAFT schedule visible via status")
+        @DisplayName("status shows TEAM_SCHEDULE after phase 1 (before assign)")
+        void statusIsTeamScheduleAfterPhase1() {
+            addMinimalLeague();
+            generateTeamSchedule();
+            execute("schedule", "status");
+            assertTrue(stdout().contains("TEAM_SCHEDULE"));
+        }
+
+        @Test
+        @DisplayName("generates a DRAFT schedule visible via status when both phases complete")
         void generatedScheduleIsDraft() {
             addMinimalLeague();
             generateDraft();
@@ -141,7 +127,7 @@ class ScheduleCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("regenerating replaces a previous draft silently")
+        @DisplayName("regenerating replaces a previous draft schedule")
         void regeneratingReplacesPreviousDraft() {
             addMinimalLeague();
             assertEquals(0, generateDraft());
@@ -154,25 +140,51 @@ class ScheduleCommandTest extends CommandTestBase {
         @DisplayName("exits 1 when a FINALIZED schedule already exists")
         void failsWhenFinalizedScheduleExists() {
             generateAndFinalizeSchedule();
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+            int exit = execute("schedule", "generate");
             assertEquals(1, exit);
             assertTrue(stderr().contains("finalized schedule"));
         }
 
         @Test
+        @DisplayName("exits 2 on corrupted league data")
+        void exitsOnCorruptedData() throws IOException {
+            corruptLeagueFile();
+            int exit = execute("schedule", "generate");
+            assertEquals(2, exit);
+            assertTrue(stderr().contains("Failed to access league data"));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // schedule assign (Phase 2 — field/time assignment)
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("schedule assign")
+    class Assign {
+
+        @Test
+        @DisplayName("exits 1 when no team schedule has been generated")
+        void failsWhenNoTeamSchedule() {
+            int exit = provideStdinAndExecute("yes\n", "schedule", "assign");
+            assertEquals(1, exit);
+            assertTrue(stderr().contains("No team schedule found"));
+        }
+
+        @Test
         @DisplayName("exits 1 when there are not enough slots to cover the fixtures")
         void failsWhenInsufficientSlots() {
-            // 4 teams → 12 games; config 09:00-10:00 → 1 slot/day; 5-day season → 5 slots < 12
-            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
+            // 4 teams → 12 games; narrow window 09:00-10:00 → 1 slot/day; 5-day season → 5 < 12
+            execute("division", "add", "Majors", "--duration", "60", "--target", "6");
             execute("team", "add", "Majors", "Team A");
             execute("team", "add", "Majors", "Team B");
             execute("team", "add", "Majors", "Team C");
             execute("team", "add", "Majors", "Team D");
             execute("field", "add", "Riverside Park");
-            execute("config", "set", "--sunrise", "09:00", "--sunset", "10:00");
-            int exit = execute("schedule", "generate",
+            execute("config", "set", "--sunrise", "09:00", "--sunset", "10:00",
                 "--start", "2026-06-01", "--end", "2026-06-05");
+            execute("schedule", "generate");
+            int exit = provideStdinAndExecute("yes\n", "schedule", "assign");
             assertEquals(1, exit);
             assertTrue(stderr().contains("games required"));
         }
@@ -181,8 +193,7 @@ class ScheduleCommandTest extends CommandTestBase {
         @DisplayName("exits 2 on corrupted league data")
         void exitsOnCorruptedData() throws IOException {
             corruptLeagueFile();
-            int exit = execute("schedule", "generate",
-                "--start", "2026-06-01", "--end", "2026-06-30");
+            int exit = provideStdinAndExecute("yes\n", "schedule", "assign");
             assertEquals(2, exit);
             assertTrue(stderr().contains("Failed to access league data"));
         }
@@ -362,15 +373,16 @@ class ScheduleCommandTest extends CommandTestBase {
         @Test
         @DisplayName("filters to only matching division when --division is specified")
         void filtersByDivision() {
-            execute("division", "add", "Majors", "--duration", "60", "--target", "10");
-            execute("division", "add", "AAA", "--duration", "60", "--target", "10");
+            execute("division", "add", "Majors", "--duration", "60", "--target", "2");
+            execute("division", "add", "AAA", "--duration", "60", "--target", "2");
             execute("team", "add", "Majors", "Blue Jays");
             execute("team", "add", "Majors", "Cardinals");
             execute("team", "add", "AAA", "Red Sox");
             execute("team", "add", "AAA", "Yankees");
             execute("field", "add", "Riverside Park");
-            execute("config", "set", "--sunrise", "09:00", "--sunset", "18:00");
-            execute("schedule", "generate", "--start", "2026-06-01", "--end", "2026-06-30");
+            execute("config", "set", "--sunrise", "09:00", "--sunset", "18:00",
+                "--start", "2026-06-01", "--end", "2026-06-30");
+            generateDraft();
             execute("schedule", "view", "--division", "Majors");
             String out = stdout();
             assertTrue(out.contains("Majors"));
@@ -402,7 +414,6 @@ class ScheduleCommandTest extends CommandTestBase {
         void showsNoMatchMessageForEmptyFilter() {
             addMinimalLeague();
             generateDraft();
-            execute("schedule", "view", "--team", "Blue Jays", "--field", "Nonexistent Field");
             assertEquals(1, execute("schedule", "view", "--field", "Nonexistent Field"));
         }
 
@@ -636,11 +647,6 @@ class ScheduleCommandTest extends CommandTestBase {
             generateDraft();
             provideStdinAndExecute("yes\n", "schedule", "finalize");
 
-            // Move game 1 to the same start time as game 2 on the same field.
-            // View to see game 2's details.
-            execute("schedule", "view");
-
-            // Override game 1 to start exactly when game 2 starts (guaranteed conflict)
             execute("schedule", "game", "override", "1", "--start", "09:00",
                 "--date", "2026-06-07", "--field", "Riverside Park");
             execute("schedule", "game", "override", "2", "--start", "09:00",

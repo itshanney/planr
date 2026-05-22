@@ -3,9 +3,12 @@ package org.leagueplan.planr.command;
 import org.leagueplan.planr.model.Field;
 import org.leagueplan.planr.model.League;
 import org.leagueplan.planr.model.Schedule;
+import org.leagueplan.planr.model.ScheduleState;
 import org.leagueplan.planr.model.ScheduleStatus;
 import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.Team;
+import org.leagueplan.planr.model.TeamGame;
+import org.leagueplan.planr.model.TeamSchedule;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
@@ -23,8 +26,8 @@ import java.util.concurrent.Callable;
 
 @Command(
     name = "game",
-    description = "Manage individual games on a finalized schedule.",
-    subcommands = { ScheduleGameCommand.OverrideCmd.class },
+    description = "Manage individual games on a schedule.",
+    subcommands = { ScheduleGameCommand.OverrideCmd.class, ScheduleGameCommand.EditHomeAwayCmd.class },
     mixinStandardHelpOptions = true
 )
 public class ScheduleGameCommand implements Runnable {
@@ -203,6 +206,84 @@ public class ScheduleGameCommand implements Runnable {
             int bStart = b.startTime().getHour() * 60 + b.startTime().getMinute();
             int bEnd = bStart + b.gameDurationMinutes() + 15;
             return aStart < bEnd && bStart < aEnd;
+        }
+    }
+
+    @Command(name = "edit",
+             description = "Swap home/away for a game in the team schedule or draft.")
+    static class EditHomeAwayCmd implements Callable<Integer> {
+
+        @ParentCommand ScheduleGameCommand parent;
+
+        @Parameters(index = "0", paramLabel = "<game-number>",
+                    description = "1-based game number from 'planr schedule view'.")
+        int gameNumber;
+
+        @Option(names = "--home", required = true, paramLabel = "<team>",
+                description = "Team name to designate as home.")
+        String teamName;
+
+        @Override
+        public Integer call() {
+            try {
+                League league = parent.scheduleCmd.app.store.load();
+                ScheduleState state = ScheduleState.of(league);
+
+                if (state == ScheduleState.NONE) {
+                    System.err.println(
+                        "Error: No team schedule found. Run 'planr schedule generate' first.");
+                    return 1;
+                }
+                if (state == ScheduleState.FINALIZED) {
+                    System.err.println(
+                        "Error: Schedule is finalized. Use 'planr schedule game override' "
+                        + "to modify individual games.");
+                    return 1;
+                }
+
+                TeamSchedule teamSchedule = league.teamSchedule();
+                if (teamSchedule == null) {
+                    System.err.println("Error: No team schedule found.");
+                    return 1;
+                }
+
+                java.util.Optional<TeamGame> gameOpt = teamSchedule.findGame(gameNumber);
+                if (gameOpt.isEmpty()) {
+                    System.err.printf("Error: Game #%d not found.%n", gameNumber);
+                    return 1;
+                }
+                TeamGame game = gameOpt.get();
+
+                boolean isCurrentHome = game.homeTeamName().equalsIgnoreCase(teamName);
+                boolean isCurrentAway = game.awayTeamName().equalsIgnoreCase(teamName);
+
+                if (!isCurrentHome && !isCurrentAway) {
+                    System.err.printf(
+                        "Error: Team \"%s\" is not playing in game #%d "
+                        + "(home: %s, away: %s).%n",
+                        teamName, gameNumber, game.homeTeamName(), game.awayTeamName());
+                    return 1;
+                }
+
+                if (isCurrentHome) {
+                    System.out.printf(
+                        "Game #%d: %s is already the home team. No change made.%n",
+                        gameNumber, game.homeTeamName());
+                    return 0;
+                }
+
+                TeamGame swapped = game.withSwappedHomeAway();
+                TeamSchedule updated = teamSchedule.withGameReplaced(gameNumber, swapped);
+                parent.scheduleCmd.app.store.save(league.withTeamSchedule(updated));
+                System.out.printf(
+                    "Game #%d updated: %s (home) vs %s (away).%n",
+                    gameNumber, swapped.homeTeamName(), swapped.awayTeamName());
+                return 0;
+
+            } catch (IOException e) {
+                System.err.printf("Error: Failed to access league data: %s%n", e.getMessage());
+                return 2;
+            }
         }
     }
 }

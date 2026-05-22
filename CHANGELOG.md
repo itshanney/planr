@@ -4,6 +4,74 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.5.1] — Phase 1 Algorithm Corrections
+
+**Spec:** `specs/2026-05-18-phase1-team-schedule.md` (Errata E1 and E2)
+
+Corrects two errors in the Phase 1 team schedule algorithm that shipped in 0.5.0.
+
+### Fixed
+
+- **Minimum target validation (E1):** `planr schedule generate` now correctly rejects a per-division target below `N−1` (the minimum for one full round-robin), not `2*(N−1)` as previously enforced. For a 4-team division the minimum is now 3, not 6.
+
+- **Single round-robin, not double (E2):** Phase 1 now generates a *single* round-robin (Pass A only, `N*(N-1)/2` games per division) and relies on fill rounds to reach the target. The former implementation generated a double round-robin (Pass A + Pass B, `N*(N-1)` base games), silently over-generating games for any target below `2*(N−1)`.
+
+- **Fixture identity in the Phase 2 solver (E2 follow-on):** `Fixture` gains a `gameId: UUID` field (carried from `TeamGame.id()`). The CP-SAT model now keys per-fixture constraints on `gameId` rather than structural equality. Previously, fill games with the same matchup direction as an earlier round-robin game collapsed into a single solver constraint, causing the solver to under-schedule fill-heavy leagues.
+
+---
+
+## [0.5.0] — Two-Phase Schedule Generation
+
+**PRD:** `features/2026-05-17-league-planner-core-scheduling-v2.md`  
+**Spec:** `specs/2026-05-18-phase1-team-schedule.md`
+
+Splits schedule generation into two explicit user-controlled phases. Phase 1 produces a reviewable team schedule (matchups with home/away assignments) using a deterministic single round-robin plus fill rounds algorithm. Phase 2 consumes that schedule and runs the OR-Tools CP-SAT solver to assign dates, times, and fields. Organizers can inspect and edit home/away assignments between phases.
+
+### Added
+
+**`planr schedule generate`** (Phase 1 — replaces the former single-step `generate`)
+- Generates a team schedule for every eligible division using the circle-method single round-robin algorithm (`N*(N-1)/2` games per division). Additional fill rounds bring each team's game count up to the division's `targetGamesPerTeam`, with home/away assignments balanced by tracking each team's running imbalance.
+- Requires season start/end dates in `planr config` and at least one division with ≥ 2 teams. Per-division target must be ≥ N−1 (minimum for one full round-robin).
+- Prints fill-round progress logs, then a tabular team schedule (`#`, `HOME`, `AWAY`, `DIVISION`), then guidance for the next steps.
+- Re-running when a team schedule or draft already exists prompts for confirmation before discarding the existing work. Blocked if a finalized schedule exists.
+- Status after Phase 1: `TEAM_SCHEDULE`.
+
+**`planr schedule assign`** (Phase 2 — field/time assignment)
+- Reads the confirmed team schedule and runs the CP-SAT solver to assign each fixture to a date, time slot, and field. Season dates and sunrise/sunset hours are read from `planr config`.
+- Displays a condensed team schedule summary and per-division feasibility estimates before prompting for confirmation.
+- On success, saves a **Draft** schedule. Status after Phase 2: `DRAFT`.
+- Enforces the same three constraints as before (C1 exact assignment, C2 no field overlap with 15-minute buffer, C3 no team double-booked per day) and the same weekly-load-balancing objective.
+
+**`planr schedule game edit <number> --home <team>`**
+- Available in `TEAM_SCHEDULE` and `DRAFT` states.
+- Swaps home and away for the specified game, designating the named team as home. No-op if the team is already home. Error if the team is not participating in that game.
+
+**`planr schedule view --team-schedule`**
+- Available in `TEAM_SCHEDULE` and `DRAFT` states. Shows the matchup-only table (no dates or fields) even after Phase 2 has run.
+
+**`planr schedule export --team-schedule`**
+- Available in `TEAM_SCHEDULE` and `DRAFT` states. Exports a JSON array with `game_number`, `home_team`, `away_team`, `division_name` fields.
+
+### Changed
+
+- **`planr schedule status`** — new `TEAM_SCHEDULE` state shows per-division game counts alongside the division's target and team count. The `DRAFT` / `FINALIZED` output is unchanged.
+- **`planr schedule view`** — when state is `TEAM_SCHEDULE`, shows the matchup-only table automatically (no date/time/field columns).
+- **`planr schedule export`** — when state is `TEAM_SCHEDULE`, automatically exports the team schedule JSON (no `--team-schedule` flag required).
+
+### New model types
+- `TeamGame` record — a single fixture in the team schedule: `id`, `gameNumber`, `homeTeamId`, `homeTeamName`, `awayTeamId`, `awayTeamName`, `divisionId`, `divisionName`, `gameDurationMinutes`. Includes `withSwappedHomeAway()`.
+- `TeamSchedule` record — an ordered list of `TeamGame` records. Includes `withGameReplaced(gameNumber, replacement)` and `findGame(gameNumber)`.
+- `ScheduleState` enum — `NONE`, `TEAM_SCHEDULE`, `DRAFT`, `FINALIZED`; derived from `(league.teamSchedule(), league.schedule())` nullability.
+- `TeamScheduleResult` sealed interface — `Success(schedule, fillRoundLogs)` or `Failure(message)`.
+- `TeamScheduleService` — encapsulates the Phase 1 algorithm (circle-method single round-robin + fill rounds).
+
+### Changed (model / persistence)
+- `League` record: gains `teamSchedule: TeamSchedule` (nullable, position 4, between `fields` and `schedule`). All `withX(...)` helpers forward it. New helpers: `withTeamSchedule(TeamSchedule)`, `withTeamScheduleCleared()` (nulls both `teamSchedule` and `schedule`).
+- `SchedulerService`: `generate(League, LocalDate, LocalDate)` replaced by `assign(League)` (reads season dates from `league.config()`, reads fixtures from `league.teamSchedule()`). New public method `estimateAvailableSlots(League, UUID, int)` for pre-Phase-2 feasibility warnings.
+- `LeagueStore` migration constructors updated to pass `null` for `teamSchedule`; no version bump required (existing v4 files load with `teamSchedule = null` via `FAIL_ON_UNKNOWN_PROPERTIES=false`).
+
+---
+
 ## [0.4.0] — v2 Entity Management
 
 **PRD:** `features/2026-05-17-league-planner-core-scheduling-v2.md`  
@@ -117,7 +185,7 @@ Adds the full schedule workflow to the `planr` CLI, delegating all constraint sa
 - `ScheduleStatus` enum — `DRAFT`, `FINALIZED`.
 - `ScheduledGame` record — a fully denormalised game: UUID, date, start time, field id/name, home team id/name, away team id/name, division id/name, game duration, and overridden flag. Includes `withOverride(...)` for partial mutation.
 - `SchedulerService` — encapsulates fixture generation (circle-method round-robin), slot enumeration (per-field, per-day, respecting availability windows), and the CP-SAT model build/solve loop.
-- `Fixture` record — an (homeTeamId, awayTeamId, divisionId, gameDurationMinutes) tuple used internally by the solver.
+- `Fixture` record — a (gameId, homeTeamId, awayTeamId, divisionId, gameDurationMinutes) tuple used internally by the solver. `gameId` carries the source `TeamGame.id()` and is used as the per-fixture constraint key so repeated matchup directions (fill games) remain distinct.
 - `Slot` record — a (date, fieldId, fieldName, startTime) tuple used internally by the solver.
 - `ScheduleResult` sealed interface — `Success(games, optimal)` or `Failure(message)`.
 

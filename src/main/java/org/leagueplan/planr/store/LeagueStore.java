@@ -67,11 +67,11 @@ public class LeagueStore {
         }
         League league = mapper.readValue(LEAGUE_FILE.toFile(), League.class);
         if (league.version() == 1) {
-            league = new League(2, null, league.divisions(), List.of(), null);
+            league = new League(2, null, league.divisions(), List.of(), null, null);
             save(league);
         }
         if (league.version() == 2) {
-            league = new League(3, null, league.divisions(), league.fields(), null);
+            league = new League(3, null, league.divisions(), league.fields(), null, null);
             save(league);
         }
         if (league.version() < 4) {
@@ -79,7 +79,7 @@ public class LeagueStore {
                 .map(f -> new Field(f.id(), f.name(), f.address(), List.of(), List.of()))
                 .toList();
             LeagueConfig config = LeagueConfig.empty();
-            league = new League(4, config, league.divisions(), migratedFields, league.schedule());
+            league = new League(4, config, league.divisions(), migratedFields, null, league.schedule());
             save(league);
             System.err.println("Warning: Field availability windows from a previous version "
                 + "have been removed. Please configure field blocks for the new season.");

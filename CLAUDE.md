@@ -30,22 +30,24 @@ gradle test --tests "org.leagueplan.planr.command.DivisionCommandTest.Add.succes
 
 **Invoke the installed binary directly (after `installDist`):**
 ```bash
-./build/install/planr/bin/planr field window add "Riverside Park" --day Saturday --start 09:00 --end 17:00
+./build/install/planr/bin/planr division list
+./build/install/planr/bin/planr schedule status
 ```
 
 ## Architecture
 
 ### Command dispatch chain
 
-Picocli routes from `PlanrApp` to top-level command classes (`DivisionCommand`, `TeamCommand`, `FieldCommand`), each of which declares its CRUD operations as static inner classes. `FieldWindowCommand` is a second-level nested subcommand registered under `FieldCommand`, making the invocation `planr field window <add|edit|delete|list>`.
+Picocli routes from `PlanrApp` to top-level command classes (`ConfigCommand`, `DivisionCommand`, `TeamCommand`, `FieldCommand`, `ScheduleCommand`), each of which declares its CRUD operations as static inner classes. `FieldBlockCommand` and `FieldOverrideCommand` are second-level nested subcommands registered under `FieldCommand`, making the invocations `planr field block <add|edit|delete|list>` and `planr field override <add|edit|delete|list>`. `ScheduleGameCommand` is similarly registered under `ScheduleCommand` for `planr schedule game <edit|override>`.
 
 Commands access the store by traversing `@ParentCommand` references:
 - Top-level commands: `parent.app.store`
-- `FieldWindowCommand` inner classes: `parent.fieldCmd.app.store`
+- `FieldBlockCommand` and `FieldOverrideCommand` inner classes: `parent.fieldCmd.app.store`
+- `ScheduleGameCommand` inner classes: `parent.scheduleCmd.app.store`
 
 ### Immutable model + store pattern
 
-All model types (`League`, `Division`, `Team`, `Field`, `AvailabilityWindow`) are Java records. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
+All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDateOverride`, `LeagueConfig`, `TeamSchedule`, `TeamGame`, `Schedule`, `ScheduledGame`, `ScheduleState`) are Java records. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
 
 1. `store.load()` → deserialize `league.json` into `League` record
 2. Build a new `League` via `withX(...)` helper methods on the model records
@@ -59,7 +61,7 @@ All model types (`League`, `Division`, `Team`, `Field`, `AvailabilityWindow`) ar
 - `WRITE_DATES_AS_TIMESTAMPS` disabled
 - `FAIL_ON_UNKNOWN_PROPERTIES` disabled (forward-compatibility for future schema versions)
 
-**Schema versioning:** The `League` record has a `version` field. Current version is `2`. `LeagueStore.load()` detects `version == 1` files and migrates them in-place by adding an empty `fields` list before returning. The compact constructor on `League` normalizes null `divisions`/`fields` to `List.of()` so v1 files (which have no `fields` JSON key) deserialize safely.
+**Schema versioning:** The `League` record has a `version` field. Current version is `4`. `LeagueStore.load()` applies migrations in sequence: v1→adds empty `fields` list; v2→no-op marker; v3→drops field availability windows (replaced by the league-wide sunrise/sunset config and per-field blocks/overrides), printing a stderr warning. The compact constructor on `League` normalizes null `divisions`/`fields` to `List.of()` so old files without those keys deserialize safely.
 
 ### Exit codes and output conventions
 

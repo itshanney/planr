@@ -6,12 +6,18 @@ import org.leagueplan.planr.model.League;
 import org.leagueplan.planr.model.LeagueConfig;
 import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.Team;
+import org.leagueplan.planr.model.TeamSchedule;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -30,12 +36,13 @@ class SchedulerServiceTest {
     // Short 7-day season used in infeasibility tests: narrow config (1 slot/day) × 7 days = 7 slots < 12.
     private static final LocalDate SHORT_SEASON_END = LocalDate.of(2026, 6, 7);
 
-    // Normal config: fields open 09:00–18:00 every day.
+    // Normal config: fields open 09:00–18:00 over the full season.
     private static final LeagueConfig CONFIG = new LeagueConfig(
-        LocalTime.of(9, 0), LocalTime.of(18, 0), null, null);
+        LocalTime.of(9, 0), LocalTime.of(18, 0), SEASON_START, SEASON_END);
     // Narrow config: fields open 09:00–10:00 → exactly 1 slot/day for 60-min games.
+    // Season dates are set to SEASON_START/SEASON_END; generateShort() swaps in SHORT_SEASON_END.
     private static final LeagueConfig NARROW_CONFIG = new LeagueConfig(
-        LocalTime.of(9, 0), LocalTime.of(10, 0), null, null);
+        LocalTime.of(9, 0), LocalTime.of(10, 0), SEASON_START, SEASON_END);
 
     // ---------------------------------------------------------------------------
     // League builder helpers
@@ -46,7 +53,9 @@ class SchedulerServiceTest {
     }
 
     private static Division division(String name, int duration, Team... teams) {
-        return new Division(UUID.randomUUID(), name, duration, 0, List.of(teams));
+        // sets target to 2*(N-1) so these integration tests produce N*(N-1) total games
+        int target = 2 * Math.max(1, teams.length - 1);
+        return new Division(UUID.randomUUID(), name, duration, target, List.of(teams));
     }
 
     private static Field field(String name) {
@@ -54,7 +63,13 @@ class SchedulerServiceTest {
     }
 
     private static League league(LeagueConfig config, List<Division> divisions, List<Field> fields) {
-        return new League(4, config, divisions, fields, null);
+        League base = new League(4, config, divisions, fields, null, null);
+        TeamScheduleResult tsResult = new TeamScheduleService().generate(base);
+        if (tsResult instanceof TeamScheduleResult.Failure f) {
+            throw new IllegalStateException("Test setup: " + f.message());
+        }
+        TeamSchedule ts = ((TeamScheduleResult.Success) tsResult).schedule();
+        return new League(4, config, divisions, fields, ts, null);
     }
 
     /** Build a minimal 2-team league. 2 games required. */
@@ -88,12 +103,15 @@ class SchedulerServiceTest {
     }
 
     private ScheduleResult generate(League l) {
-        return new SchedulerService().generate(l, SEASON_START, SEASON_END);
+        return new SchedulerService().assign(l);
     }
 
-    /** Uses the short (7-day) season where narrow config produces 7 slots — triggers pre-solve infeasibility for 4+ teams. */
+    /** Uses the short (7-day) season — triggers pre-solve infeasibility for 4+ teams with narrow config. */
     private ScheduleResult generateShort(League l) {
-        return new SchedulerService().generate(l, SEASON_START, SHORT_SEASON_END);
+        LeagueConfig shortConfig = new LeagueConfig(
+            l.config().sunriseTime(), l.config().sunsetTime(), SEASON_START, SHORT_SEASON_END);
+        League shortLeague = new League(4, shortConfig, l.divisions(), l.fields(), l.teamSchedule(), null);
+        return new SchedulerService().assign(shortLeague);
     }
 
     // ---------------------------------------------------------------------------
@@ -125,43 +143,53 @@ class SchedulerServiceTest {
     }
 
     // ---------------------------------------------------------------------------
-    // Home/away balance: each ordered pair appears exactly once
+    // Home/away balance: each unordered pair appears; home/away counts are balanced
     // ---------------------------------------------------------------------------
 
     @Test
-    @DisplayName("each team-pair appears exactly once with each home/away assignment")
-    void eachTeamPairAppearsOnceInEachDirection() {
+    @DisplayName("each unordered team pair appears at least once in the schedule")
+    void eachUnorderedTeamPairAppearsAtLeastOnce() {
         ScheduleResult result = generate(fourTeamLeague());
         assertInstanceOf(ScheduleResult.Success.class, result);
         List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
 
-        for (int i = 0; i < games.size(); i++) {
-            ScheduledGame gi = games.get(i);
-            long count = games.stream()
-                .filter(g -> g.homeTeamId().equals(gi.homeTeamId())
-                          && g.awayTeamId().equals(gi.awayTeamId()))
-                .count();
-            assertEquals(1, count,
-                "Ordered pair (" + gi.homeTeamName() + ", " + gi.awayTeamName()
-                + ") should appear exactly once");
+        Set<UUID> teamIds = new HashSet<>();
+        games.forEach(g -> { teamIds.add(g.homeTeamId()); teamIds.add(g.awayTeamId()); });
+        List<UUID> teamList = new ArrayList<>(teamIds);
+
+        for (int i = 0; i < teamList.size(); i++) {
+            for (int j = i + 1; j < teamList.size(); j++) {
+                UUID x = teamList.get(i), y = teamList.get(j);
+                long count = games.stream()
+                    .filter(g -> (g.homeTeamId().equals(x) && g.awayTeamId().equals(y))
+                              || (g.homeTeamId().equals(y) && g.awayTeamId().equals(x)))
+                    .count();
+                assertTrue(count >= 1,
+                    "Unordered pair should appear at least once; got " + count + " for (" + x + ", " + y + ")");
+            }
         }
     }
 
     @Test
-    @DisplayName("the reverse of every game (home↔away swapped) also exists in the schedule")
-    void reverseOfEveryGameAlsoExists() {
+    @DisplayName("each team's home and away game counts differ by at most N-1 (fill reduces initial RR skew)")
+    void homeAndAwayCountsDifferByAtMostNMinus1() {
+        // 4 teams → at most 3 imbalance. Verifies balance-tracking is active:
+        // without it, some teams could be home/away for all fill games (imbalance up to 6).
+        int n = 4;
         ScheduleResult result = generate(fourTeamLeague());
         assertInstanceOf(ScheduleResult.Success.class, result);
         List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
 
+        Map<UUID, int[]> counts = new HashMap<>();
         for (ScheduledGame g : games) {
-            long reverseCount = games.stream()
-                .filter(other -> other.homeTeamId().equals(g.awayTeamId())
-                              && other.awayTeamId().equals(g.homeTeamId()))
-                .count();
-            assertEquals(1, reverseCount,
-                "Reverse of (" + g.homeTeamName() + " vs " + g.awayTeamName()
-                + ") should exist exactly once");
+            counts.computeIfAbsent(g.homeTeamId(), k -> new int[2])[0]++;
+            counts.computeIfAbsent(g.awayTeamId(), k -> new int[2])[1]++;
+        }
+        for (Map.Entry<UUID, int[]> entry : counts.entrySet()) {
+            int home = entry.getValue()[0];
+            int away = entry.getValue()[1];
+            assertTrue(Math.abs(home - away) <= n - 1,
+                "Home/away imbalance for team " + entry.getKey() + ": home=" + home + " away=" + away);
         }
     }
 

@@ -15,6 +15,8 @@ import org.leagueplan.planr.model.FieldDateOverride;
 import org.leagueplan.planr.model.League;
 import org.leagueplan.planr.model.LeagueConfig;
 import org.leagueplan.planr.model.ScheduledGame;
+import org.leagueplan.planr.model.TeamGame;
+import org.leagueplan.planr.model.TeamSchedule;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -36,11 +38,28 @@ public class SchedulerService {
 
     private record GameVar(BoolVar var, Fixture fixture, Slot slot) {}
 
-    public ScheduleResult generate(League league, LocalDate seasonStart, LocalDate seasonEnd) {
+    /**
+     * Phase 2: assigns dates, times, and fields to every game in the confirmed team schedule.
+     * Season dates are read from league.config(). Fixtures are read from league.teamSchedule().
+     */
+    public ScheduleResult assign(League league) {
+        if (league.teamSchedule() == null || league.teamSchedule().games().isEmpty()) {
+            return ScheduleResult.failure(
+                "Error: No team schedule found. Run 'planr schedule generate' first.");
+        }
+
+        LeagueConfig config = league.config();
+        if (config == null || config.seasonStart() == null || config.seasonEnd() == null) {
+            return ScheduleResult.failure(
+                "Error: Season start and end dates must be configured. "
+                + "Run 'planr config set --start <date> --end <date>'.");
+        }
+
         Loader.loadNativeLibraries();
 
-        Map<UUID, List<Fixture>> fixturesByDiv = generateAllFixtures(league);
-        Map<UUID, List<Slot>> slotsByDiv = enumerateAllSlots(league, seasonStart, seasonEnd);
+        Map<UUID, List<Fixture>> fixturesByDiv = toFixturesByDiv(league.teamSchedule());
+        Map<UUID, List<Slot>> slotsByDiv =
+            enumerateAllSlots(league, config.seasonStart(), config.seasonEnd());
 
         String infeasibilityMsg = checkSimpleFeasibility(league, fixturesByDiv, slotsByDiv);
         if (infeasibilityMsg != null) {
@@ -50,66 +69,67 @@ public class SchedulerService {
         return buildAndSolve(league, fixturesByDiv, slotsByDiv);
     }
 
-    // --- Fixture generation (circle method) ---
+    // --- Fixture conversion ---
 
-    private Map<UUID, List<Fixture>> generateAllFixtures(League league) {
+    private Map<UUID, List<Fixture>> toFixturesByDiv(TeamSchedule teamSchedule) {
         Map<UUID, List<Fixture>> result = new LinkedHashMap<>();
-        for (Division div : league.divisions()) {
-            if (div.teams().size() < 2) continue;
-            result.put(div.id(), generateFixturesForDivision(div));
+        for (TeamGame game : teamSchedule.games()) {
+            result.computeIfAbsent(game.divisionId(), k -> new ArrayList<>())
+                .add(new Fixture(
+                    game.id(),
+                    game.homeTeamId(),
+                    game.awayTeamId(),
+                    game.divisionId(),
+                    game.gameDurationMinutes()));
         }
         return result;
     }
 
-    private List<Fixture> generateFixturesForDivision(Division div) {
-        List<UUID> ids = new ArrayList<>();
-        for (var t : div.teams()) ids.add(t.id());
+    // --- Slot estimation (used by the assign command for the pre-confirm feasibility warning) ---
 
-        int n = ids.size();
-        boolean hasBye = (n % 2 != 0);
-        if (hasBye) {
-            ids.add(null); // null = bye week placeholder
-            n++;
+    /**
+     * Returns an upper-bound estimate of how many games could fit in the season window for the
+     * given division. Walks every date in the configured season, subtracts field blocks, and
+     * counts slots using the same 15-minute grid as the solver. Does not invoke the solver.
+     */
+    public int estimateAvailableSlots(League league, UUID divisionId, int gameDurationMinutes) {
+        LeagueConfig config = league.config();
+        if (config == null || config.seasonStart() == null || config.seasonEnd() == null
+                || config.sunriseTime() == null || config.sunsetTime() == null) {
+            return 0;
         }
 
-        List<Fixture> firstHalf = new ArrayList<>();
-        // Rotating list of all team IDs except the fixed first one
-        List<UUID> rotating = new ArrayList<>(ids.subList(1, n));
-        UUID fixed = ids.get(0);
+        int total = 0;
+        for (LocalDate date = config.seasonStart();
+             !date.isAfter(config.seasonEnd());
+             date = date.plusDays(1)) {
 
-        for (int round = 0; round < n - 1; round++) {
-            boolean fixedIsHome = (round % 2 == 0);
+            for (Field field : league.fields()) {
+                LocalTime openStart = config.sunriseTime();
+                LocalTime openEnd = config.sunsetTime();
+                for (FieldDateOverride override : field.dateOverrides()) {
+                    if (override.date().equals(date)) {
+                        openStart = override.openStart();
+                        openEnd = override.openEnd();
+                        break;
+                    }
+                }
 
-            // Fixed team paired with the last entry in the rotating list
-            UUID opp = rotating.get(n - 2);
-            if (fixed != null && opp != null) {
-                firstHalf.add(fixedIsHome
-                    ? new Fixture(fixed, opp, div.id(), div.gameDurationMinutes())
-                    : new Fixture(opp, fixed, div.id(), div.gameDurationMinutes()));
-            }
+                final LocalDate currentDate = date;
+                List<FieldBlock> dateBlocks = field.blocks().stream()
+                    .filter(b -> b.date().equals(currentDate))
+                    .toList();
 
-            // Remaining positions paired top-to-bottom
-            for (int i = 0; i < (n - 2) / 2; i++) {
-                UUID top = rotating.get(i);
-                UUID bot = rotating.get(n - 3 - i);
-                if (top != null && bot != null) {
-                    firstHalf.add((round % 2 == 0)
-                        ? new Fixture(top, bot, div.id(), div.gameDurationMinutes())
-                        : new Fixture(bot, top, div.id(), div.gameDurationMinutes()));
+                for (LocalTime[] window : subtractBlocks(openStart, openEnd, dateBlocks)) {
+                    LocalTime slotStart = window[0];
+                    while (!slotStart.plusMinutes(gameDurationMinutes).isAfter(window[1])) {
+                        total++;
+                        slotStart = slotStart.plusMinutes(GRID_MINUTES);
+                    }
                 }
             }
-
-            // Rotate: bring last entry to front
-            UUID last = rotating.remove(rotating.size() - 1);
-            rotating.add(0, last);
         }
-
-        // Second half: swap home/away for each first-half fixture (double round-robin)
-        List<Fixture> all = new ArrayList<>(firstHalf);
-        for (Fixture f : firstHalf) {
-            all.add(new Fixture(f.awayTeamId(), f.homeTeamId(), f.divisionId(), f.gameDurationMinutes()));
-        }
-        return all;
+        return total;
     }
 
     // --- Slot enumeration ---
@@ -125,13 +145,12 @@ public class SchedulerService {
 
         LeagueConfig config = league.config();
         if (config == null || config.sunriseTime() == null || config.sunsetTime() == null) {
-            return slotsByDiv; // no open window configured — all slot lists remain empty
+            return slotsByDiv;
         }
 
         for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
             final LocalDate currentDate = date;
             for (Field field : league.fields()) {
-                // Effective open window: per-date override takes priority over league defaults.
                 LocalTime openStart = config.sunriseTime();
                 LocalTime openEnd = config.sunsetTime();
                 for (FieldDateOverride override : field.dateOverrides()) {
@@ -142,12 +161,10 @@ public class SchedulerService {
                     }
                 }
 
-                // Collect blocks for this field on this date.
                 List<FieldBlock> dateBlocks = field.blocks().stream()
                     .filter(b -> b.date().equals(currentDate))
                     .toList();
 
-                // Available sub-windows after subtracting blocks from open window.
                 List<LocalTime[]> available = subtractBlocks(openStart, openEnd, dateBlocks);
 
                 for (UUID divId : slotsByDiv.keySet()) {
@@ -241,14 +258,11 @@ public class SchedulerService {
 
         CpModel model = new CpModel();
 
-        // All (fixture, slot) -> BoolVar pairs, flat list plus indexes
         List<GameVar> allGameVars = new ArrayList<>();
-        Map<Fixture, List<GameVar>> byFixture = new HashMap<>();
-        // Key: fieldId + "|" + date
+        // Keyed by fixture.gameId() so duplicate matchup directions (fill games) remain distinct.
+        Map<UUID, List<GameVar>> byFixture = new HashMap<>();
         Map<String, List<GameVar>> byFieldDate = new HashMap<>();
-        // Key: teamId + "|" + date
         Map<String, List<GameVar>> byTeamDate = new HashMap<>();
-        // Key: teamId + "|" + weekYear (ISO week of year + year)
         Map<String, List<GameVar>> byTeamWeek = new HashMap<>();
 
         int varIndex = 0;
@@ -258,12 +272,12 @@ public class SchedulerService {
             List<Slot> slots = slotsByDiv.getOrDefault(divId, List.of());
 
             for (Fixture fixture : fixtures) {
-                byFixture.put(fixture, new ArrayList<>());
+                byFixture.put(fixture.gameId(), new ArrayList<>());
                 for (Slot slot : slots) {
                     BoolVar var = model.newBoolVar("g" + varIndex++);
                     GameVar gv = new GameVar(var, fixture, slot);
                     allGameVars.add(gv);
-                    byFixture.get(fixture).add(gv);
+                    byFixture.get(fixture.gameId()).add(gv);
 
                     String fieldDateKey = slot.fieldId() + "|" + slot.date();
                     byFieldDate.computeIfAbsent(fieldDateKey, k -> new ArrayList<>()).add(gv);
@@ -335,7 +349,6 @@ public class SchedulerService {
                 + "Reduce the number of teams, extend the season, or add more field availability.");
         }
 
-        // FEASIBLE or OPTIMAL: extract assigned games
         List<ScheduledGame> games = new ArrayList<>();
         for (GameVar gv : allGameVars) {
             if (solver.booleanValue(gv.var())) {

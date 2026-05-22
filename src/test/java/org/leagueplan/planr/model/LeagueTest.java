@@ -19,7 +19,7 @@ class LeagueTest {
     @BeforeEach
     void setUp() {
         majors = new Division(DIV_ID, "Majors", 120, 0, List.of());
-        league = new League(1, null, List.of(majors), List.of(), null);
+        league = new League(1, null, List.of(majors), List.of(), null, null);
     }
 
     // --- empty() ---

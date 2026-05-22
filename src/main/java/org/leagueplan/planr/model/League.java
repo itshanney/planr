@@ -5,7 +5,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-public record League(int version, LeagueConfig config, List<Division> divisions, List<Field> fields, Schedule schedule) {
+public record League(
+    int version,
+    LeagueConfig config,
+    List<Division> divisions,
+    List<Field> fields,
+    TeamSchedule teamSchedule,
+    Schedule schedule
+) {
 
     private static final int CURRENT_VERSION = 4;
 
@@ -15,13 +22,13 @@ public record League(int version, LeagueConfig config, List<Division> divisions,
     }
 
     public static League empty() {
-        return new League(CURRENT_VERSION, LeagueConfig.empty(), List.of(), List.of(), null);
+        return new League(CURRENT_VERSION, LeagueConfig.empty(), List.of(), List.of(), null, null);
     }
 
     // --- Config mutations ---
 
     public League withConfig(LeagueConfig newConfig) {
-        return new League(version, newConfig, divisions, fields, schedule);
+        return new League(version, newConfig, divisions, fields, teamSchedule, schedule);
     }
 
     // --- Division queries ---
@@ -41,19 +48,19 @@ public record League(int version, LeagueConfig config, List<Division> divisions,
     public League withDivisionAdded(Division division) {
         return new League(version, config,
             Stream.concat(divisions.stream(), Stream.of(division)).toList(),
-            fields, schedule);
+            fields, teamSchedule, schedule);
     }
 
     public League withDivisionReplaced(UUID id, Division replacement) {
         return new League(version, config,
             divisions.stream().map(d -> d.id().equals(id) ? replacement : d).toList(),
-            fields, schedule);
+            fields, teamSchedule, schedule);
     }
 
     public League withDivisionRemoved(UUID id) {
         return new League(version, config,
             divisions.stream().filter(d -> !d.id().equals(id)).toList(),
-            fields, schedule);
+            fields, teamSchedule, schedule);
     }
 
     // --- Field queries ---
@@ -72,22 +79,34 @@ public record League(int version, LeagueConfig config, List<Division> divisions,
 
     public League withFieldAdded(Field field) {
         return new League(version, config, divisions,
-            Stream.concat(fields.stream(), Stream.of(field)).toList(), schedule);
+            Stream.concat(fields.stream(), Stream.of(field)).toList(), teamSchedule, schedule);
     }
 
     public League withFieldReplaced(UUID id, Field replacement) {
         return new League(version, config, divisions,
-            fields.stream().map(f -> f.id().equals(id) ? replacement : f).toList(), schedule);
+            fields.stream().map(f -> f.id().equals(id) ? replacement : f).toList(),
+            teamSchedule, schedule);
     }
 
     public League withFieldRemoved(UUID id) {
         return new League(version, config, divisions,
-            fields.stream().filter(f -> !f.id().equals(id)).toList(), schedule);
+            fields.stream().filter(f -> !f.id().equals(id)).toList(), teamSchedule, schedule);
+    }
+
+    // --- TeamSchedule mutations ---
+
+    public League withTeamSchedule(TeamSchedule newTeamSchedule) {
+        return new League(version, config, divisions, fields, newTeamSchedule, schedule);
+    }
+
+    /** Discards both the team schedule and any draft/finalized schedule. Used when re-running Phase 1. */
+    public League withTeamScheduleCleared() {
+        return new League(version, config, divisions, fields, null, null);
     }
 
     // --- Schedule mutations ---
 
     public League withSchedule(Schedule newSchedule) {
-        return new League(version, config, divisions, fields, newSchedule);
+        return new League(version, config, divisions, fields, teamSchedule, newSchedule);
     }
 }

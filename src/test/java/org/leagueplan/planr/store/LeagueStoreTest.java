@@ -87,7 +87,7 @@ class LeagueStoreTest {
     @DisplayName("save() and load() round-trips all division fields including UUID")
     void saveAndLoad_roundTripsDivisionFields() throws IOException {
         UUID divId = UUID.randomUUID();
-        store.save(new League(4, null, List.of(new Division(divId, "Majors", 120, 0, List.of())), List.of(), null));
+        store.save(new League(4, null, List.of(new Division(divId, "Majors", 120, 0, List.of())), List.of(), null, null));
 
         League loaded = store.load();
         assertEquals(1, loaded.divisions().size());
@@ -103,7 +103,7 @@ class LeagueStoreTest {
         UUID teamId = UUID.randomUUID();
         Team team = new Team(teamId, "Blue Jays");
         Division division = new Division(UUID.randomUUID(), "Majors", 120, 0, List.of(team));
-        store.save(new League(4, null, List.of(division), List.of(), null));
+        store.save(new League(4, null, List.of(division), List.of(), null, null));
 
         List<Team> loadedTeams = store.load().divisions().get(0).teams();
         assertEquals(1, loadedTeams.size());
@@ -120,7 +120,7 @@ class LeagueStoreTest {
             new Division(UUID.randomUUID(), "Coast",  90,  0, List.of()),
             new Division(UUID.randomUUID(), "T-Ball", 60,  0, List.of())
         );
-        store.save(new League(4, null, divisions, List.of(), null));
+        store.save(new League(4, null, divisions, List.of(), null, null));
 
         List<Division> loaded = store.load().divisions();
         assertEquals(4, loaded.size());
@@ -134,7 +134,7 @@ class LeagueStoreTest {
     @DisplayName("save() and load() round-trips a division name containing special characters")
     void saveAndLoad_roundTripsSpecialCharactersInName() throws IOException {
         Division division = new Division(UUID.randomUUID(), "T-Ball & Rookie", 60, 0, List.of());
-        store.save(new League(4, null, List.of(division), List.of(), null));
+        store.save(new League(4, null, List.of(division), List.of(), null, null));
         assertEquals("T-Ball & Rookie", store.load().divisions().get(0).name());
     }
 
