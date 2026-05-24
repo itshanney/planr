@@ -47,7 +47,7 @@ Commands access the store by traversing `@ParentCommand` references:
 
 ### Immutable model + store pattern
 
-All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDateOverride`, `LeagueConfig`, `TeamSchedule`, `TeamGame`, `Schedule`, `ScheduledGame`, `ScheduleState`) are Java records. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
+All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDateOverride`, `LeagueConfig`, `TeamSchedule`, `TeamGame`, `Schedule`, `ScheduledGame`) are Java records. `ScheduleState` and `ScheduleStatus` are enums, not records — `ScheduleState` is derived from `(league.teamSchedule(), league.schedule())` nullability via `ScheduleState.of(league)`. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
 
 1. `store.load()` → deserialize `league.json` into `League` record
 2. Build a new `League` via `withX(...)` helper methods on the model records
@@ -63,9 +63,23 @@ All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDate
 
 **Schema versioning:** The `League` record has a `version` field. Current version is `4`. `LeagueStore.load()` applies migrations in sequence: v1→adds empty `fields` list; v2→no-op marker; v3→drops field availability windows (replaced by the league-wide sunrise/sunset config and per-field blocks/overrides), printing a stderr warning. The compact constructor on `League` normalizes null `divisions`/`fields` to `List.of()` so old files without those keys deserialize safely.
 
+### Scheduler package
+
+`src/main/java/org/leagueplan/planr/scheduler/` holds all scheduling logic and its supporting types. None of these are persisted to `league.json`.
+
+- `TeamScheduleService` — Phase 1: circle-method round-robin + fill rounds, produces a `TeamSchedule`.
+- `SchedulerService` — Phase 2: OR-Tools CP-SAT field/time assignment. Public methods: `assign(League)` and `estimateAvailableSlots(League, UUID, int)`.
+- `TeamScheduleResult` — sealed interface: `Success(schedule, fillRoundLogs)` or `Failure(message)`.
+- `ScheduleResult` — sealed interface: `Success(games, optimal, targetMet, divisionSummaries)` or `Failure(message)`.
+- `DivisionSummary` — record carrying per-division solve stats: `divisionName`, `gamesRequested`, `gamesAssigned`, `slotsAvailable`. Derived method `targetMet()`.
+- `Fixture` — `(gameId, homeTeamId, awayTeamId, divisionId, gameDurationMinutes)` tuple used internally by the CP-SAT model.
+- `Slot` — `(date, fieldId, fieldName, startTime)` tuple used internally by the CP-SAT model.
+
 ### Exit codes and output conventions
 
-All commands: `stdout` on success (one line), `stderr` on error (one line). Exit `0` = success, `1` = validation error, `2` = I/O error. Field and division names are matched case-insensitively throughout.
+Most commands: `stdout` on success, `stderr` on error. Exit `0` = success, `1` = validation error, `2` = I/O error. Field and division names are matched case-insensitively throughout.
+
+**Multi-line output:** `planr schedule generate` and `planr schedule assign` emit multiple stdout lines. Phase 1 prints fill-round logs, a matchup table, and a summary line. Phase 2 streams live `[M:SS]` progress lines during the solve, then a constraint summary table and a final status line. All progress output goes to `stdout`.
 
 ### Test isolation
 

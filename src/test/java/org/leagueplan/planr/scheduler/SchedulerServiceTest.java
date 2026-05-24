@@ -301,21 +301,25 @@ class SchedulerServiceTest {
     // ---------------------------------------------------------------------------
 
     @Test
-    @DisplayName("returns Failure when there are fewer slots than fixtures for a division")
+    @DisplayName("returns partial Success (not Failure) when there are fewer slots than fixtures")
     void returnsFailureWhenInsufficientSlots() {
         // 4 teams → 12 games needed. Narrow config (09:00-10:00) → 1 slot/day.
-        // Short season (7 days) → 7 slots < 12 → pre-solve catches infeasibility.
+        // Short season (7 days) → 7 slots < 12 → solver assigns as many as possible.
         Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
         Division div = division("Majors", 60, t1, t2, t3, t4);
         Field f = field("Riverside Park");
         League l = league(NARROW_CONFIG, List.of(div), List.of(f));
 
         ScheduleResult result = generateShort(l);
-        assertInstanceOf(ScheduleResult.Failure.class, result);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+        assertFalse(success.targetMet(), "Should be partial when slots < fixtures");
+        assertTrue(success.games().size() < 12, "Fewer than 12 games should be assigned");
+        assertTrue(success.games().size() > 0, "At least some games should be assigned");
     }
 
     @Test
-    @DisplayName("failure message names the infeasible division and includes game counts")
+    @DisplayName("partial success DivisionSummary names the deficit division with correct counts")
     void failureMessageNamesInfeasibleDivision() {
         Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
         Division div = division("Majors", 60, t1, t2, t3, t4);
@@ -323,19 +327,25 @@ class SchedulerServiceTest {
         League l = league(NARROW_CONFIG, List.of(div), List.of(f));
 
         ScheduleResult result = generateShort(l);
-        assertInstanceOf(ScheduleResult.Failure.class, result);
-        String msg = ((ScheduleResult.Failure) result).message();
-        assertTrue(msg.contains("Majors"),
-            "Failure message should name the infeasible division; got: " + msg);
-        assertTrue(msg.contains("12"),
-            "Failure message should include 12 games required; got: " + msg);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+        assertFalse(success.targetMet());
+
+        DivisionSummary majorsSummary = success.divisionSummaries().stream()
+            .filter(s -> s.divisionName().equals("Majors"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("Majors summary missing"));
+        assertEquals(12, majorsSummary.gamesRequested(),
+            "Majors should have 12 games requested");
+        assertTrue(majorsSummary.gamesAssigned() < 12,
+            "Majors should have fewer than 12 games assigned; got: " + majorsSummary.gamesAssigned());
     }
 
     @Test
-    @DisplayName("feasible division is listed as OK in the failure diagnostic when another division is infeasible")
+    @DisplayName("both divisions appear in summaries when one has a slot deficit")
     void feasibleDivisionListedAsOkInFailureDiagnostic() {
-        // Majors: infeasible (4 teams → 12 games, 7 slots available)
-        // AAA:    feasible  (2 teams → 2 games, 7 slots available)
+        // Majors: 4 teams → 12 games, 7 slots available → partial
+        // AAA:    2 teams → 2 games, 7 slots available → may be target-met
         Team m1 = team("A"), m2 = team("B"), m3 = team("C"), m4 = team("D");
         Team a1 = team("E"), a2 = team("F");
         Division majors = division("Majors", 60, m1, m2, m3, m4);
@@ -344,10 +354,167 @@ class SchedulerServiceTest {
         League l = league(NARROW_CONFIG, List.of(majors, aaa), List.of(f));
 
         ScheduleResult result = generateShort(l);
-        assertInstanceOf(ScheduleResult.Failure.class, result);
-        String msg = ((ScheduleResult.Failure) result).message();
-        assertTrue(msg.contains("AAA") && msg.contains("OK"),
-            "Failure message should list AAA as OK; got: " + msg);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+        assertFalse(success.targetMet());
+
+        List<DivisionSummary> summaries = success.divisionSummaries();
+        assertEquals(2, summaries.size(), "Should have summaries for both divisions");
+
+        DivisionSummary majorsSummary = summaries.stream()
+            .filter(s -> s.divisionName().equals("Majors")).findFirst().orElseThrow();
+        assertTrue(majorsSummary.gamesAssigned() < 12,
+            "Majors should be partial");
+
+        assertTrue(summaries.stream().anyMatch(s -> s.divisionName().equals("AAA")),
+            "AAA summary should be present");
+    }
+
+    // ---------------------------------------------------------------------------
+    // DivisionSummary accuracy
+    // ---------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("targetMet is true when all games are assigned in a full-season league")
+    void targetMetIsTrueWhenAllGamesAssigned() {
+        ScheduleResult result = generate(twoTeamLeague());
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        assertTrue(((ScheduleResult.Success) result).targetMet());
+    }
+
+    @Test
+    @DisplayName("divisionSummaries contains one entry per division in a multi-division league")
+    void divisionSummariesPresentForEachDivision() {
+        Team m1 = team("Blue Jays"), m2 = team("Cardinals");
+        Team a1 = team("Red Sox"),   a2 = team("Yankees");
+        Division majors = division("Majors", 60, m1, m2);
+        Division aaa    = division("AAA",    60, a1, a2);
+        Field f = field("Riverside Park");
+        League l = league(CONFIG, List.of(majors, aaa), List.of(f));
+
+        ScheduleResult result = generate(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        List<DivisionSummary> summaries = ((ScheduleResult.Success) result).divisionSummaries();
+        assertEquals(2, summaries.size());
+        assertTrue(summaries.stream().anyMatch(s -> s.divisionName().equals("Majors")));
+        assertTrue(summaries.stream().anyMatch(s -> s.divisionName().equals("AAA")));
+    }
+
+    @Test
+    @DisplayName("DivisionSummary.gamesRequested equals the total fixture count for the division")
+    void divisionSummaryGamesRequestedMatchesFixtureCount() {
+        // 4-team div: helper sets target=6 → TeamScheduleService generates 12 total games
+        ScheduleResult result = generate(fourTeamLeague());
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        DivisionSummary summary = ((ScheduleResult.Success) result).divisionSummaries().get(0);
+        assertEquals(12, summary.gamesRequested());
+    }
+
+    @Test
+    @DisplayName("DivisionSummary.gamesAssigned matches the count of ScheduledGames for that division")
+    void divisionSummaryGamesAssignedEqualsActualAssignedCount() {
+        Team m1 = team("Blue Jays"), m2 = team("Cardinals");
+        Team a1 = team("Red Sox"),   a2 = team("Yankees");
+        Division majors = division("Majors", 60, m1, m2);
+        Division aaa    = division("AAA",    60, a1, a2);
+        Field f = field("Riverside Park");
+        League l = league(CONFIG, List.of(majors, aaa), List.of(f));
+
+        ScheduleResult result = generate(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+
+        for (DivisionSummary summary : success.divisionSummaries()) {
+            long actual = success.games().stream()
+                .filter(g -> g.divisionName().equals(summary.divisionName()))
+                .count();
+            assertEquals(summary.gamesAssigned(), (int) actual,
+                "gamesAssigned mismatch for " + summary.divisionName());
+        }
+    }
+
+    @Test
+    @DisplayName("DivisionSummary.slotsAvailable matches estimateAvailableSlots() for the same config")
+    void slotsAvailableMatchesEstimateAvailableSlots() {
+        League l = twoTeamLeague();
+        ScheduleResult result = generate(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        DivisionSummary summary = ((ScheduleResult.Success) result).divisionSummaries().get(0);
+
+        Division div = l.divisions().get(0);
+        int estimate = new SchedulerService().estimateAvailableSlots(l, div.id(), div.gameDurationMinutes());
+        assertEquals(estimate, summary.slotsAvailable());
+    }
+
+    @Test
+    @DisplayName("partial: 4-team div with 1-day narrow season gets exactly 1 game assigned")
+    void partialSuccessWhenSingleSlotAvailableForMultipleFixtures() {
+        // 1-day season × 09:00-10:00 window = 1 slot; 4-team div = 12 fixtures → 1 game assigned
+        LeagueConfig oneDayConfig = new LeagueConfig(
+            LocalTime.of(9, 0), LocalTime.of(10, 0), SEASON_START, SEASON_START);
+        Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
+        Division div = division("Majors", 60, t1, t2, t3, t4);
+        Field f = field("Riverside Park");
+        League l = league(oneDayConfig, List.of(div), List.of(f));
+
+        ScheduleResult result = new SchedulerService().assign(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+        assertFalse(success.targetMet());
+        assertEquals(1, success.games().size(), "1 slot available → exactly 1 game assigned");
+        DivisionSummary summary = success.divisionSummaries().get(0);
+        assertEquals(12, summary.gamesRequested());
+        assertEquals(1, summary.gamesAssigned());
+        assertEquals(1, summary.slotsAvailable());
+    }
+
+    @Test
+    @DisplayName("division with no fitting slots gets 0 games assigned; other division is target-met")
+    void divisionWithNoFittingSlotGetsZeroGamesAssigned() {
+        // T-Ball: 90-min games in 09:00-10:00 window (60 min) → 0 slots, 0 games
+        // AAA:    60-min games in same window → 1 slot/day × 91 days → target-met
+        Team tball1 = team("T1"), tball2 = team("T2");
+        Team aaa1   = team("F1"), aaa2   = team("F2");
+        Division tBall = division("T-Ball", 90, tball1, tball2);
+        Division aaa   = division("AAA",    60, aaa1,   aaa2);
+        Field f = field("Riverside Park");
+        League l = league(NARROW_CONFIG, List.of(tBall, aaa), List.of(f));
+
+        ScheduleResult result = generate(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        ScheduleResult.Success success = (ScheduleResult.Success) result;
+        assertFalse(success.targetMet());
+
+        DivisionSummary tBallSummary = success.divisionSummaries().stream()
+            .filter(s -> s.divisionName().equals("T-Ball")).findFirst().orElseThrow();
+        assertEquals(0, tBallSummary.slotsAvailable(),
+            "90-min game does not fit in 60-min window → 0 slots");
+        assertEquals(0, tBallSummary.gamesAssigned());
+
+        DivisionSummary aaaSummary = success.divisionSummaries().stream()
+            .filter(s -> s.divisionName().equals("AAA")).findFirst().orElseThrow();
+        assertTrue(aaaSummary.targetMet());
+    }
+
+    @Test
+    @DisplayName("divisionSummaries are sorted alphabetically by division name")
+    void divisionSummariesAreSortedAlphabetically() {
+        Team z1 = team("ZA"), z2 = team("ZB");
+        Team a1 = team("AA"), a2 = team("AB");
+        Team m1 = team("MA"), m2 = team("MB");
+        Division zebra  = new Division(UUID.randomUUID(), "Zebra",  60, 2, List.of(z1, z2));
+        Division alpha  = new Division(UUID.randomUUID(), "Alpha",  60, 2, List.of(a1, a2));
+        Division majors = new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(m1, m2));
+        Field f = field("Riverside Park");
+        League l = league(CONFIG, List.of(zebra, alpha, majors), List.of(f));
+
+        ScheduleResult result = generate(l);
+        assertInstanceOf(ScheduleResult.Success.class, result);
+        List<DivisionSummary> summaries = ((ScheduleResult.Success) result).divisionSummaries();
+        assertEquals(3, summaries.size());
+        assertEquals("Alpha",  summaries.get(0).divisionName());
+        assertEquals("Majors", summaries.get(1).divisionName());
+        assertEquals("Zebra",  summaries.get(2).divisionName());
     }
 
     // ---------------------------------------------------------------------------

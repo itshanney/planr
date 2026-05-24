@@ -4,6 +4,52 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.6.0] — Phase 2 Partial Schedules, Solver Progress & Constraint Summary
+
+**PRD:** `features/2026-05-17-league-planner-core-scheduling-v2.md`  
+**Spec:** `specs/2026-05-23-phase2-field-assignment.md`
+
+Upgrades Phase 2 field assignment in three areas: the solver now saves a partial draft instead of failing when slots are insufficient; live `[M:SS]` progress lines stream to stdout during the solve; and a per-division constraint summary is printed after every run. The solver time budget extends from 60 to 300 seconds.
+
+### Added
+
+- **Partial schedule support** — `planr schedule assign` no longer returns a hard failure when any division has fewer available field slots than games. The CP-SAT model is updated from a hard `addExactlyOne` per fixture to a soft `addAtMostOne` plus an `isAssigned` BoolVar. The objective is changed to a weighted maximize: `bigM × totalAssigned − maxWeekLoad`, where `bigM = totalFixtures + 1` guarantees lexicographic dominance (more assigned games always beats better week-load balance). The solver assigns as many games as possible and saves a Draft regardless. Exit code remains 0 for partial schedules.
+
+- **Live solver progress output** — Four timestamped `[M:SS]` lines are streamed to stdout during Phase 2:
+  - `[0:00] Phase 2 started. N games across D division(s).` — emitted by `AssignCmd` before calling the service.
+  - `[0:XX] Feasibility check passed. Solver started.` or `[0:XX] Feasibility check: <division> deficit (N games, M slots). Solver started.` — emitted after slot enumeration.
+  - `[M:SS] Solver progress: ~N% of time budget used.` — emitted by `ProgressCallback.onSolutionCallback()` at 25 %/50 %/75 % of the time budget using `wallTime()`.
+  - `[M:SS] Solver complete. N of T games assigned (target-met|partial[, optimal]).` — emitted after `solver.solve()` returns.
+
+- **Constraint summary** — Always printed after every Phase 2 run. Tabular per-division output showing games requested, slots available, used/available ratio, and status (`target-met` or `partial (N unassigned)`). Footer line reads `"All targets met."` or `"Warning: N game(s) could not be assigned."`.
+
+- **Per-team shortfall** — Printed only when `targetMet == false`. For each division with unassigned games, lists every team that fell short with its `assigned/requested` game count (e.g., `Cardinals: 4/6 games assigned`). Computed in `AssignCmd` by diffing `league.teamSchedule()` against `result.games()`.
+
+- **`DivisionSummary` record** — New transient record in the `scheduler` package: `divisionName`, `gamesRequested`, `gamesAssigned`, `slotsAvailable`. Derived methods: `targetMet()` (`gamesAssigned == gamesRequested`), `usedAvailRatio()`. Not persisted to `league.json`.
+
+### Changed
+
+- **`ScheduleResult.Success`** — Gains two new fields: `boolean targetMet` and `List<DivisionSummary> divisionSummaries`. The `ScheduleResult.success(...)` factory method updated to accept all four parameters.
+
+- **Solver time limit** — `SOLVER_TIME_LIMIT_SECONDS` extended from 60 to 300. The solver terminates early when CP-SAT proves OPTIMAL; the extended budget provides headroom for larger leagues.
+
+- **C2 (field non-overlap) constraint** — Rewritten from a pairwise O(N²) loop over conflicting `(field, date)` game pairs to a time-tick-bucket approach. Each `BoolVar` is registered under every 15-minute tick it occupies; one `addAtMostOne` is added per `(fieldId, date, tick)` bucket. This bounds C2 to at most `numFields × numDays × ticksPerDay` constraints regardless of fixture count, eliminating the OOM error that occurred at scale.
+
+- **Final status line** — Updated to a three-case format:
+  - Target met, optimal: `Draft schedule saved: N games assigned (target-met, optimal distribution).`
+  - Target met, not optimal: `Draft schedule saved: N games assigned (target-met, good distribution — optimizer ran up to 300s).`
+  - Partial: `Draft schedule saved: N of M games assigned (partial).`
+
+- **Hard failure cases** — `UNKNOWN` solver status (timed out before finding any feasible solution) now returns `ScheduleResult.Failure` with a diagnostic message and does not save a draft. `INFEASIBLE` status (theoretically impossible with `addAtMostOne`) also returns `Failure` with an internal-error message.
+
+### Tests
+
+- **`SchedulerServiceTest`** — 8 new tests in the new `DivisionSummary accuracy` section: `targetMet` correctness, per-division summary presence, `gamesRequested` fixture count accuracy, `gamesAssigned` vs actual game count consistency, `slotsAvailable` vs `estimateAvailableSlots()` agreement, single-slot partial schedule (1 game assigned from 12 fixtures), zero-slot division (90-min game in 60-min window), and alphabetical summary ordering.
+
+- **`ScheduleCommandTest`** — New `@Nested` class `ProgressAndConstraintSummary` with 11 tests covering: Phase 2 start and solver-complete progress lines, constraint summary presence, `target-met` and `All targets met` footer on success, `partial` status and `Teams that fell short` section on partial schedules, `N/M games assigned` fraction format, absence of shortfall output on full assignment, and `Draft schedule saved` / `(partial)` final status line variants.
+
+---
+
 ## [0.5.1] — Phase 1 Algorithm Corrections
 
 **Spec:** `specs/2026-05-18-phase1-team-schedule.md` (Errata E1 and E2)

@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -175,7 +176,7 @@ class ScheduleCommandTest extends CommandTestBase {
         }
 
         @Test
-        @DisplayName("exits 1 when there are not enough slots to cover the fixtures")
+        @DisplayName("exits 0 with partial draft when there are not enough slots to cover all fixtures")
         void failsWhenInsufficientSlots() {
             // 4 teams → 12 games; narrow window 09:00-10:00 → 1 slot/day; 5-day season → 5 < 12
             execute("division", "add", "Majors", "--duration", "60", "--target", "6");
@@ -188,8 +189,9 @@ class ScheduleCommandTest extends CommandTestBase {
                 "--start", "2026-06-01", "--end", "2026-06-05");
             execute("schedule", "generate");
             int exit = provideStdinAndExecute("yes\n", "schedule", "assign");
-            assertEquals(1, exit);
-            assertTrue(stderr().contains("games required"));
+            assertEquals(0, exit);
+            assertTrue(stdout().contains("partial"),
+                "stdout should contain 'partial' when not all games could be assigned");
         }
 
         @Test
@@ -199,6 +201,121 @@ class ScheduleCommandTest extends CommandTestBase {
             int exit = provideStdinAndExecute("yes\n", "schedule", "assign");
             assertEquals(2, exit);
             assertTrue(stderr().contains("Failed to access league data"));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // schedule assign — progress and constraint summary
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("schedule assign — progress and constraint summary")
+    class ProgressAndConstraintSummary {
+
+        private void addPartialLeague() {
+            // 4 teams → 12 games; narrow 09:00-10:00 → 1 slot/day; 5-day season → 5 slots < 12
+            execute("division", "add", "Majors", "--duration", "60", "--target", "6");
+            execute("team", "add", "Majors", "Team A");
+            execute("team", "add", "Majors", "Team B");
+            execute("team", "add", "Majors", "Team C");
+            execute("team", "add", "Majors", "Team D");
+            execute("field", "add", "Riverside Park");
+            execute("config", "set", "--sunrise", "09:00", "--sunset", "10:00",
+                "--start", "2026-06-01", "--end", "2026-06-05");
+        }
+
+        private int generatePartialDraft() {
+            execute("schedule", "generate");
+            return provideStdinAndExecute("yes\n", "schedule", "assign");
+        }
+
+        @Test
+        @DisplayName("stdout contains the Phase 2 start progress line")
+        void emitsPhase2StartProgressLine() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("[0:00] Phase 2 started."));
+        }
+
+        @Test
+        @DisplayName("stdout contains the solver-complete progress line")
+        void emitsSolverCompleteProgressLine() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("Solver complete."));
+        }
+
+        @Test
+        @DisplayName("Constraint Summary is always printed after a successful assign")
+        void constraintSummaryAlwaysPrinted() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("Constraint Summary"));
+        }
+
+        @Test
+        @DisplayName("constraint summary shows target-met status when all games are assigned")
+        void constraintSummaryShowsTargetMetStatusOnSuccess() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("target-met"));
+        }
+
+        @Test
+        @DisplayName("constraint summary footer says 'All targets met' on full assignment")
+        void constraintSummaryShowsAllTargetsMetSummaryLine() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("All targets met"));
+        }
+
+        @Test
+        @DisplayName("constraint summary shows 'partial' status when slots are insufficient")
+        void constraintSummaryShowsPartialStatusWhenInsufficient() {
+            addPartialLeague();
+            generatePartialDraft();
+            assertTrue(stdout().contains("partial"));
+        }
+
+        @Test
+        @DisplayName("per-team shortfall section is printed when not all games could be assigned")
+        void teamShortfallPrintedOnPartialSchedule() {
+            addPartialLeague();
+            generatePartialDraft();
+            assertTrue(stdout().contains("Teams that fell short of target"));
+        }
+
+        @Test
+        @DisplayName("per-team shortfall shows game counts in N/M format")
+        void teamShortfallShowsGameCountsInFractionFormat() {
+            addPartialLeague();
+            generatePartialDraft();
+            assertTrue(Pattern.compile("\\d+/\\d+ games assigned").matcher(stdout()).find(),
+                "stdout should contain a fraction like '4/6 games assigned'");
+        }
+
+        @Test
+        @DisplayName("per-team shortfall is not printed when all games are assigned")
+        void teamShortfallNotPrintedWhenAllGamesAssigned() {
+            addMinimalLeague();
+            generateDraft();
+            assertFalse(stdout().contains("Teams that fell short"));
+        }
+
+        @Test
+        @DisplayName("final status line says 'Draft schedule saved'")
+        void finalStatusLineSaysDraftScheduleSaved() {
+            addMinimalLeague();
+            generateDraft();
+            assertTrue(stdout().contains("Draft schedule saved"));
+        }
+
+        @Test
+        @DisplayName("partial final status line contains '(partial)'")
+        void partialFinalStatusLineIncludesPartialKeyword() {
+            addPartialLeague();
+            generatePartialDraft();
+            assertTrue(stdout().contains("(partial)"));
         }
     }
 

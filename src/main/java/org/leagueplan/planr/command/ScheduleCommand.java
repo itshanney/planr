@@ -11,6 +11,8 @@ import org.leagueplan.planr.model.ScheduleState;
 import org.leagueplan.planr.model.ScheduleStatus;
 import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.TeamGame;
+import org.leagueplan.planr.model.TeamSchedule;
+import org.leagueplan.planr.scheduler.DivisionSummary;
 import org.leagueplan.planr.scheduler.ScheduleResult;
 import org.leagueplan.planr.scheduler.SchedulerService;
 import org.leagueplan.planr.scheduler.TeamScheduleResult;
@@ -23,6 +25,7 @@ import picocli.CommandLine.Spec;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -207,7 +210,9 @@ public class ScheduleCommand implements Runnable {
                     return 0;
                 }
 
-                System.out.println("Generating schedule, this may take up to 60 seconds...");
+                System.out.printf("[0:00] Phase 2 started. %d games across %d division(s).%n",
+                    games.size(), byDiv.size());
+                System.out.flush();
 
                 ScheduleResult result = schedulerService.assign(league);
 
@@ -217,6 +222,14 @@ public class ScheduleCommand implements Runnable {
                 }
 
                 ScheduleResult.Success success = (ScheduleResult.Success) result;
+
+                printConstraintSummary(success.divisionSummaries());
+
+                if (!success.targetMet()) {
+                    printTeamShortfall(
+                        league.teamSchedule(), success.games(), success.divisionSummaries());
+                }
+
                 Schedule schedule = new Schedule(
                     ScheduleStatus.DRAFT,
                     league.config().seasonStart(),
@@ -224,15 +237,28 @@ public class ScheduleCommand implements Runnable {
                     success.games());
                 parent.app.store.save(league.withSchedule(schedule));
 
-                long divCount = success.games().stream()
-                    .map(ScheduledGame::divisionId).distinct().count();
-                String qualifier = success.optimal()
-                    ? "optimal distribution"
-                    : "good distribution — optimizer ran for 60s";
-                System.out.printf(
-                    "Draft schedule generated: %d games across %d division(s) (%s).%n"
-                    + "Run 'planr schedule view' to review.%n",
-                    success.games().size(), divCount, qualifier);
+                int totalRequested = league.teamSchedule().games().size();
+                String finalLine;
+                if (success.targetMet()) {
+                    if (success.optimal()) {
+                        finalLine = String.format(
+                            "Draft schedule saved: %d games assigned (target-met, optimal distribution)."
+                            + " Run 'planr schedule view' to review.",
+                            success.games().size());
+                    } else {
+                        finalLine = String.format(
+                            "Draft schedule saved: %d games assigned"
+                            + " (target-met, good distribution — optimizer ran up to 300s)."
+                            + " Run 'planr schedule view' to review.",
+                            success.games().size());
+                    }
+                } else {
+                    finalLine = String.format(
+                        "Draft schedule saved: %d of %d games assigned (partial)."
+                        + " Run 'planr schedule view' to review.",
+                        success.games().size(), totalRequested);
+                }
+                System.out.println(finalLine);
                 return 0;
 
             } catch (IOException e) {
@@ -674,6 +700,104 @@ public class ScheduleCommand implements Runnable {
 
         System.out.printf("%-" + teamW + "s  %" + homeW + "d  %" + awayW + "d  %" + totalW + "d%n",
             "TOTAL", totalHome, totalAway, totalHome + totalAway);
+    }
+
+    static void printConstraintSummary(List<DivisionSummary> summaries) {
+        System.out.println("Constraint Summary");
+        System.out.println("------------------");
+
+        int divW = Math.max("DIVISION".length(),
+            summaries.stream().mapToInt(s -> s.divisionName().length()).max().orElse(0));
+        int gamesW = Math.max("GAMES".length(),
+            summaries.stream().mapToInt(s -> String.valueOf(s.gamesRequested()).length()).max().orElse(0));
+        int slotsW = Math.max("SLOTS".length(),
+            summaries.stream().mapToInt(s -> String.valueOf(s.slotsAvailable()).length()).max().orElse(0));
+        int usedAvailW = Math.max("USED/AVAIL".length(),
+            summaries.stream()
+                .mapToInt(s -> (s.gamesAssigned() + "/" + s.slotsAvailable()).length())
+                .max().orElse(0));
+        int statusW = Math.max("STATUS".length(),
+            summaries.stream().mapToInt(s -> statusLabel(s).length()).max().orElse(0));
+
+        String fmt = "%-" + divW + "s  %" + gamesW + "s  %" + slotsW + "s  %-" + usedAvailW + "s  %-" + statusW + "s%n";
+        System.out.printf(fmt, "DIVISION", "GAMES", "SLOTS", "USED/AVAIL", "STATUS");
+        System.out.printf(fmt, "-".repeat(divW), "-".repeat(gamesW), "-".repeat(slotsW),
+            "-".repeat(usedAvailW), "-".repeat(statusW));
+
+        for (DivisionSummary s : summaries) {
+            String usedAvail = s.gamesAssigned() + "/" + s.slotsAvailable();
+            System.out.printf(fmt, s.divisionName(), s.gamesRequested(), s.slotsAvailable(),
+                usedAvail, statusLabel(s));
+        }
+        System.out.println();
+
+        int totalRequested = summaries.stream().mapToInt(DivisionSummary::gamesRequested).sum();
+        int totalAssigned = summaries.stream().mapToInt(DivisionSummary::gamesAssigned).sum();
+        if (summaries.stream().allMatch(DivisionSummary::targetMet)) {
+            System.out.printf("All targets met. %d of %d games assigned.%n", totalAssigned, totalRequested);
+        } else {
+            System.out.printf("Warning: %d game(s) could not be assigned. Draft saved with %d of %d games.%n",
+                totalRequested - totalAssigned, totalAssigned, totalRequested);
+        }
+    }
+
+    private static String statusLabel(DivisionSummary s) {
+        return s.targetMet() ? "target-met"
+            : "partial (" + (s.gamesRequested() - s.gamesAssigned()) + " unassigned)";
+    }
+
+    static void printTeamShortfall(TeamSchedule teamSchedule, List<ScheduledGame> assignedGames,
+            List<DivisionSummary> divisionSummaries) {
+        Set<String> partialDivNames = divisionSummaries.stream()
+            .filter(s -> !s.targetMet())
+            .map(DivisionSummary::divisionName)
+            .collect(Collectors.toSet());
+        if (partialDivNames.isEmpty()) return;
+
+        Map<UUID, Integer> requested = new HashMap<>();
+        Map<UUID, String> teamNameById = new HashMap<>();
+        Map<UUID, String> teamDivisionName = new HashMap<>();
+
+        for (TeamGame g : teamSchedule.games()) {
+            if (!partialDivNames.contains(g.divisionName())) continue;
+            requested.merge(g.homeTeamId(), 1, Integer::sum);
+            requested.merge(g.awayTeamId(), 1, Integer::sum);
+            teamNameById.put(g.homeTeamId(), g.homeTeamName());
+            teamNameById.put(g.awayTeamId(), g.awayTeamName());
+            teamDivisionName.put(g.homeTeamId(), g.divisionName());
+            teamDivisionName.put(g.awayTeamId(), g.divisionName());
+        }
+
+        Map<UUID, Integer> assigned = new HashMap<>();
+        for (ScheduledGame g : assignedGames) {
+            if (!partialDivNames.contains(g.divisionName())) continue;
+            assigned.merge(g.homeTeamId(), 1, Integer::sum);
+            assigned.merge(g.awayTeamId(), 1, Integer::sum);
+        }
+
+        Map<String, List<UUID>> shortTeamsByDiv = new LinkedHashMap<>();
+        for (UUID teamId : requested.keySet()) {
+            int req = requested.get(teamId);
+            int asgn = assigned.getOrDefault(teamId, 0);
+            if (asgn < req) {
+                shortTeamsByDiv.computeIfAbsent(teamDivisionName.get(teamId), k -> new ArrayList<>())
+                    .add(teamId);
+            }
+        }
+        shortTeamsByDiv.values().forEach(
+            teams -> teams.sort(Comparator.comparing((UUID id) -> teamNameById.getOrDefault(id, ""))));
+
+        shortTeamsByDiv.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                System.out.printf("Teams that fell short of target (%s):%n", entry.getKey());
+                for (UUID teamId : entry.getValue()) {
+                    System.out.printf("  %s: %d/%d games assigned%n",
+                        teamNameById.get(teamId),
+                        assigned.getOrDefault(teamId, 0),
+                        requested.get(teamId));
+                }
+            });
     }
 
     static void printHeadToHeadBlock(List<TeamGame> games, String divisionName) {
