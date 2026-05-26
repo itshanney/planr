@@ -17,10 +17,13 @@ import org.leagueplan.planr.model.FieldDateOverride;
 import org.leagueplan.planr.model.FieldDivisionLock;
 import org.leagueplan.planr.model.League;
 import org.leagueplan.planr.model.LeagueConfig;
+import org.leagueplan.planr.model.Playoff;
+import org.leagueplan.planr.model.PlayoffGame;
 import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.TeamGame;
 import org.leagueplan.planr.model.TeamSchedule;
 
+import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -31,6 +34,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class SchedulerService {
@@ -532,6 +536,277 @@ public class SchedulerService {
             .findFirst()
             .map(Division::name)
             .orElse("[unknown]");
+    }
+
+    // --- Playoff field assignment ---
+
+    /**
+     * Assigns field/time slots to all real (non-bye) playoff games across all provided playoffs
+     * in a single CP-SAT solve. Returns assignmentsByGameId mapping PlayoffGame.gameId → Slot.
+     */
+    public PlayoffScheduleResult assignPlayoffs(League league, List<Playoff> playoffs) {
+        Loader.loadNativeLibraries();
+
+        long startMs = System.currentTimeMillis();
+
+        LocalDate start = playoffs.get(0).startDate();
+        LocalDate end = playoffs.get(0).endDate();
+
+        // Build fixtures from non-bye playoff games; pseudo-UUIDs stand in for unknown teams.
+        Map<UUID, List<Fixture>> fixturesByDiv = new LinkedHashMap<>();
+        // Track gameId → divisionId for result assembly
+        Map<UUID, UUID> gameIdToDivId = new HashMap<>();
+
+        for (Playoff playoff : playoffs) {
+            UUID divId = playoff.divisionId();
+            int duration = divisionDuration(league, divId);
+            List<Fixture> fixtures = new ArrayList<>();
+            for (PlayoffGame game : playoff.games()) {
+                if (game.isBye()) continue;
+                UUID pseudoHome = UUID.nameUUIDFromBytes(
+                    ("pA:" + game.gameId()).getBytes(StandardCharsets.UTF_8));
+                UUID pseudoAway = UUID.nameUUIDFromBytes(
+                    ("pB:" + game.gameId()).getBytes(StandardCharsets.UTF_8));
+                fixtures.add(new Fixture(game.gameId(), pseudoHome, pseudoAway, divId, duration));
+                gameIdToDivId.put(game.gameId(), divId);
+            }
+            if (!fixtures.isEmpty()) {
+                fixturesByDiv.put(divId, fixtures);
+            }
+        }
+
+        if (fixturesByDiv.isEmpty()) {
+            return PlayoffScheduleResult.failure(
+                "Error: No real game slots to assign (all games are byes).");
+        }
+
+        Set<UUID> playoffDivIds = fixturesByDiv.keySet();
+        Map<UUID, List<Slot>> slotsByDiv =
+            enumeratePlayoffSlots(league, start, end, playoffDivIds);
+        Map<UUID, Integer> slotCounts = computeSlotCounts(slotsByDiv);
+
+        int totalFixtures = fixturesByDiv.values().stream().mapToInt(List::size).sum();
+        int elapsed0 = (int)((System.currentTimeMillis() - startMs) / 1000);
+        System.out.printf("[%d:%02d] Feasibility check: %d game slots across %d division(s). Solver started.%n",
+            elapsed0 / 60, elapsed0 % 60, totalFixtures, fixturesByDiv.size());
+        System.out.flush();
+
+        return buildAndSolvePlayoffs(league, fixturesByDiv, slotsByDiv, slotCounts, startMs);
+    }
+
+    private Map<UUID, List<Slot>> enumeratePlayoffSlots(League league, LocalDate start, LocalDate end,
+            Set<UUID> divisionIds) {
+        Map<UUID, List<Slot>> slotsByDiv = new HashMap<>();
+        for (UUID divId : divisionIds) {
+            slotsByDiv.put(divId, new ArrayList<>());
+        }
+
+        LeagueConfig config = league.config();
+        if (config == null || config.sunriseTime() == null || config.sunsetTime() == null) {
+            return slotsByDiv;
+        }
+
+        for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+            final LocalDate currentDate = date;
+            for (Field field : league.fields()) {
+                LocalTime[] openWindow = resolveOpenWindow(config, field, currentDate);
+                if (openWindow == null) continue;
+
+                List<FieldBlock> dateBlocks = field.blocks().stream()
+                    .filter(b -> b.date().equals(currentDate))
+                    .toList();
+                List<LocalTime[]> available = subtractBlocks(openWindow[0], openWindow[1], dateBlocks);
+
+                for (UUID divId : divisionIds) {
+                    if (isFieldLockedToOtherDivision(field, currentDate, divId)) continue;
+                    if (isDivisionPinnedElsewhere(league, field, currentDate, divId)) continue;
+                    int duration = divisionDuration(league, divId);
+                    for (LocalTime[] window : available) {
+                        LocalTime slotStart = window[0];
+                        while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
+                            slotsByDiv.get(divId).add(
+                                new Slot(currentDate, field.id(), field.name(), slotStart));
+                            slotStart = slotStart.plusMinutes(GRID_MINUTES);
+                        }
+                    }
+                }
+            }
+        }
+        return slotsByDiv;
+    }
+
+    private PlayoffScheduleResult buildAndSolvePlayoffs(
+            League league,
+            Map<UUID, List<Fixture>> fixturesByDiv,
+            Map<UUID, List<Slot>> slotsByDiv,
+            Map<UUID, Integer> slotCounts,
+            long startMs) {
+
+        CpModel model = new CpModel();
+
+        List<GameVar> allGameVars = new ArrayList<>();
+        Map<UUID, List<GameVar>> byFixture = new LinkedHashMap<>();
+        Map<String, List<BoolVar>> byFieldTick = new HashMap<>();
+        Map<String, List<GameVar>> byTeamDate = new HashMap<>();
+        Map<String, List<GameVar>> byTeamWeek = new HashMap<>();
+
+        int varIndex = 0;
+        for (Map.Entry<UUID, List<Fixture>> divEntry : fixturesByDiv.entrySet()) {
+            UUID divId = divEntry.getKey();
+            List<Fixture> fixtures = divEntry.getValue();
+            List<Slot> slots = slotsByDiv.getOrDefault(divId, List.of());
+
+            for (Fixture fixture : fixtures) {
+                byFixture.put(fixture.gameId(), new ArrayList<>());
+                for (Slot slot : slots) {
+                    BoolVar var = model.newBoolVar("g" + varIndex++);
+                    GameVar gv = new GameVar(var, fixture, slot);
+                    allGameVars.add(gv);
+                    byFixture.get(fixture.gameId()).add(gv);
+
+                    int gameStart = slot.startMinutes();
+                    int gameEnd = gameStart + fixture.gameDurationMinutes() + BUFFER_MINUTES;
+                    String fieldDate = slot.fieldId() + "|" + slot.date() + "|";
+                    for (int t = gameStart; t < gameEnd; t += GRID_MINUTES) {
+                        byFieldTick.computeIfAbsent(fieldDate + t, k -> new ArrayList<>()).add(var);
+                    }
+
+                    String homeKey = fixture.homeTeamId() + "|" + slot.date();
+                    String awayKey = fixture.awayTeamId() + "|" + slot.date();
+                    byTeamDate.computeIfAbsent(homeKey, k -> new ArrayList<>()).add(gv);
+                    byTeamDate.computeIfAbsent(awayKey, k -> new ArrayList<>()).add(gv);
+
+                    var weekFields = WeekFields.ISO;
+                    String weekKey = slot.date().get(weekFields.weekOfWeekBasedYear())
+                        + "|" + slot.date().get(weekFields.weekBasedYear());
+                    byTeamWeek.computeIfAbsent(fixture.homeTeamId() + "|" + weekKey, k -> new ArrayList<>()).add(gv);
+                    byTeamWeek.computeIfAbsent(fixture.awayTeamId() + "|" + weekKey, k -> new ArrayList<>()).add(gv);
+                }
+            }
+        }
+
+        // C1: each fixture assigned at most once
+        Map<UUID, BoolVar> isAssigned = new LinkedHashMap<>();
+        for (Map.Entry<UUID, List<GameVar>> entry : byFixture.entrySet()) {
+            UUID fixtureId = entry.getKey();
+            List<GameVar> vars = entry.getValue();
+            Literal[] lits = vars.stream().map(gv -> (Literal) gv.var()).toArray(Literal[]::new);
+            model.addAtMostOne(lits);
+            BoolVar assigned = model.newBoolVar("a" + varIndex++);
+            model.addEquality(assigned, LinearExpr.sum(lits));
+            isAssigned.put(fixtureId, assigned);
+        }
+
+        // C2: field non-overlap per 15-min tick
+        for (List<BoolVar> tickVars : byFieldTick.values()) {
+            if (tickVars.size() > 1) {
+                Literal[] lits = tickVars.stream().map(v -> (Literal) v).toArray(Literal[]::new);
+                model.addAtMostOne(lits);
+            }
+        }
+
+        // C3: no team plays twice on the same day (pseudo-UUIDs ensure this only fires for real conflicts)
+        for (List<GameVar> teamDayVars : byTeamDate.values()) {
+            if (teamDayVars.size() > 1) {
+                Literal[] lits = teamDayVars.stream().map(gv -> (Literal) gv.var()).toArray(Literal[]::new);
+                model.addAtMostOne(lits);
+            }
+        }
+
+        int totalFixtures = fixturesByDiv.values().stream().mapToInt(List::size).sum();
+
+        Literal[] allAssignedLits = isAssigned.values().stream()
+            .map(v -> (Literal) v).toArray(Literal[]::new);
+        IntVar totalAssignedVar = model.newIntVar(0, totalFixtures, "total_assigned");
+        model.addEquality(totalAssignedVar, LinearExpr.sum(allAssignedLits));
+
+        LeagueConfig config = league.config();
+        int weekCap = (config != null && config.maxGamesPerWeek() != null)
+            ? config.maxGamesPerWeek() : DEFAULT_MAX_GAMES_PER_WEEK;
+        int restDays = (config != null && config.minRestDays() != null)
+            ? config.minRestDays() : DEFAULT_MIN_REST_DAYS;
+
+        // C4: max games per week per team
+        IntVar maxWeekLoad = model.newIntVar(0, weekCap, "max_week_load");
+        for (List<GameVar> weekVars : byTeamWeek.values()) {
+            if (!weekVars.isEmpty()) {
+                Literal[] lits = weekVars.stream().map(gv -> (Literal) gv.var()).toArray(Literal[]::new);
+                model.addLessOrEqual(LinearExpr.sum(lits), LinearExpr.constant(weekCap));
+                model.addLessOrEqual(LinearExpr.sum(lits), maxWeekLoad);
+            }
+        }
+
+        // C5: min rest days between games
+        if (restDays > 0) {
+            for (Map.Entry<String, List<GameVar>> entry : byTeamDate.entrySet()) {
+                if (entry.getValue().isEmpty()) continue;
+                String[] parts = entry.getKey().split("\\|", 2);
+                String teamIdStr = parts[0];
+                LocalDate date = LocalDate.parse(parts[1]);
+                for (int r = 1; r <= restDays; r++) {
+                    List<GameVar> nextDayVars = byTeamDate.getOrDefault(
+                        teamIdStr + "|" + date.plusDays(r), List.of());
+                    if (nextDayVars.isEmpty()) continue;
+                    List<Literal> combined = new ArrayList<>();
+                    entry.getValue().forEach(gv -> combined.add(gv.var()));
+                    nextDayVars.forEach(gv -> combined.add(gv.var()));
+                    if (combined.size() > 1) {
+                        model.addAtMostOne(combined.toArray(Literal[]::new));
+                    }
+                }
+            }
+        }
+
+        long bigM = (long) totalFixtures + 1;
+        model.maximize(LinearExpr.weightedSum(
+            new IntVar[]{totalAssignedVar, maxWeekLoad},
+            new long[]{bigM, -1L}
+        ));
+
+        CpSolver solver = new CpSolver();
+        solver.getParameters().setMaxTimeInSeconds(SOLVER_TIME_LIMIT_SECONDS);
+        ProgressCallback callback = new ProgressCallback(SOLVER_TIME_LIMIT_SECONDS);
+        CpSolverStatus status = solver.solve(model, callback);
+
+        if (status == CpSolverStatus.UNKNOWN) {
+            return PlayoffScheduleResult.failure(
+                "Error: Solver timed out without assigning any games. "
+                + "Try extending the playoff window or adding more field availability.");
+        }
+        if (status == CpSolverStatus.INFEASIBLE) {
+            return PlayoffScheduleResult.failure(
+                "Error: Solver returned an unexpected result. Please report this bug.");
+        }
+
+        Map<UUID, Slot> assignmentsByGameId = new LinkedHashMap<>();
+        Map<UUID, Long> assignedByDiv = new HashMap<>();
+        for (GameVar gv : allGameVars) {
+            if (solver.booleanValue(gv.var())) {
+                assignmentsByGameId.put(gv.fixture().gameId(), gv.slot());
+                assignedByDiv.merge(gv.fixture().divisionId(), 1L, Long::sum);
+            }
+        }
+
+        int elapsed = (int)((System.currentTimeMillis() - startMs) / 1000);
+        int assigned = assignmentsByGameId.size();
+        String completionStatus = (assigned == totalFixtures ? "target-met" : "partial")
+            + (status == CpSolverStatus.OPTIMAL ? ", optimal" : "");
+        System.out.printf("[%d:%02d] Solver complete. %d of %d game slots assigned (%s).%n",
+            elapsed / 60, elapsed % 60, assigned, totalFixtures, completionStatus);
+        System.out.flush();
+
+        List<DivisionSummary> summaries = fixturesByDiv.entrySet().stream()
+            .map(e -> {
+                UUID divId = e.getKey();
+                int requested = e.getValue().size();
+                int assignedCount = assignedByDiv.getOrDefault(divId, 0L).intValue();
+                int slots = slotCounts.getOrDefault(divId, 0);
+                return new DivisionSummary(divisionName(league, divId), requested, assignedCount, slots);
+            })
+            .sorted(Comparator.comparing(DivisionSummary::divisionName))
+            .toList();
+
+        return PlayoffScheduleResult.success(assignmentsByGameId, status == CpSolverStatus.OPTIMAL, summaries);
     }
 
     // --- Progress callback ---

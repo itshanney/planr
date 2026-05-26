@@ -65,13 +65,13 @@ class SchedulerServiceTest {
     }
 
     private static League league(LeagueConfig config, List<Division> divisions, List<Field> fields) {
-        League base = new League(4, config, divisions, fields, null, null);
+        League base = new League(4, config, divisions, fields, null, null, List.of());
         TeamScheduleResult tsResult = new TeamScheduleService().generate(base);
         if (tsResult instanceof TeamScheduleResult.Failure f) {
             throw new IllegalStateException("Test setup: " + f.message());
         }
         TeamSchedule ts = ((TeamScheduleResult.Success) tsResult).schedule();
-        return new League(4, config, divisions, fields, ts, null);
+        return new League(4, config, divisions, fields, ts, null, List.of());
     }
 
     /** Build a minimal 2-team league. 2 games required. */
@@ -113,7 +113,7 @@ class SchedulerServiceTest {
         LeagueConfig shortConfig = new LeagueConfig(
             l.config().sunriseTime(), l.config().sunsetTime(), SEASON_START, SHORT_SEASON_END,
             List.of(), List.of(), null, null);
-        League shortLeague = new League(5, shortConfig, l.divisions(), l.fields(), l.teamSchedule(), null);
+        League shortLeague = new League(5, shortConfig, l.divisions(), l.fields(), l.teamSchedule(), null, List.of());
         return new SchedulerService().assign(shortLeague);
     }
 

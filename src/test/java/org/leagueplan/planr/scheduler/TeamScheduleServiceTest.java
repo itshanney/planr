@@ -35,7 +35,7 @@ class TeamScheduleServiceTest {
     }
 
     private static League league(LeagueConfig config, Division... divisions) {
-        return new League(4, config, List.of(divisions), List.of(), null, null);
+        return new League(4, config, List.of(divisions), List.of(), null, null, List.of());
     }
 
     private static League league(Division... divisions) {

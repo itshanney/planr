@@ -67,11 +67,11 @@ public class LeagueStore {
         }
         League league = mapper.readValue(LEAGUE_FILE.toFile(), League.class);
         if (league.version() == 1) {
-            league = new League(2, null, league.divisions(), List.of(), null, null);
+            league = new League(2, null, league.divisions(), List.of(), null, null, List.of());
             save(league);
         }
         if (league.version() == 2) {
-            league = new League(3, null, league.divisions(), league.fields(), null, null);
+            league = new League(3, null, league.divisions(), league.fields(), null, null, List.of());
             save(league);
         }
         if (league.version() < 4) {
@@ -79,7 +79,7 @@ public class LeagueStore {
                 .map(f -> new Field(f.id(), f.name(), f.address(), List.of(), List.of(), List.of()))
                 .toList();
             LeagueConfig config = LeagueConfig.empty();
-            league = new League(4, config, league.divisions(), migratedFields, null, league.schedule());
+            league = new League(4, config, league.divisions(), migratedFields, null, league.schedule(), List.of());
             save(league);
             System.err.println("Warning: Field availability windows from a previous version "
                 + "have been removed. Please configure field blocks for the new season.");
@@ -90,7 +90,7 @@ public class LeagueStore {
         // the new fields (FAIL_ON_UNKNOWN_PROPERTIES is disabled), but they will be lost on next save.
         if (league.version() < 5) {
             league = new League(5, league.config(), league.divisions(), league.fields(),
-                league.teamSchedule(), league.schedule());
+                league.teamSchedule(), league.schedule(), List.of());
             save(league);
         }
         // v5→v6: adds maxGamesPerWeek and minRestDays to LeagueConfig, and divisionLocks to Field.
@@ -98,7 +98,14 @@ public class LeagueStore {
         // respectively, so no data transformation is required — this block only stamps the version.
         if (league.version() < 6) {
             league = new League(6, league.config(), league.divisions(), league.fields(),
-                league.teamSchedule(), league.schedule());
+                league.teamSchedule(), league.schedule(), List.of());
+            save(league);
+        }
+        // v6→v7: adds playoffs list to League. Absent from old JSON; compact constructor normalizes
+        // null to List.of(), so no data transformation needed — this block only stamps the version.
+        if (league.version() < 7) {
+            league = new League(7, league.config(), league.divisions(), league.fields(),
+                league.teamSchedule(), league.schedule(), league.playoffs());
             save(league);
         }
         return league;

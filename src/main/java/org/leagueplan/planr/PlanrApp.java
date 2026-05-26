@@ -3,6 +3,7 @@ package org.leagueplan.planr;
 import org.leagueplan.planr.command.ConfigCommand;
 import org.leagueplan.planr.command.DivisionCommand;
 import org.leagueplan.planr.command.FieldCommand;
+import org.leagueplan.planr.command.PlayoffCommand;
 import org.leagueplan.planr.command.ScheduleCommand;
 import org.leagueplan.planr.command.TeamCommand;
 import org.leagueplan.planr.store.LeagueStore;
@@ -19,6 +20,7 @@ import picocli.CommandLine.Spec;
         FieldCommand.class,
         ScheduleCommand.class,
         ConfigCommand.class,
+        PlayoffCommand.class,
         CommandLine.HelpCommand.class
     },
     description = "League Planner — schedule management for little league organizers.",

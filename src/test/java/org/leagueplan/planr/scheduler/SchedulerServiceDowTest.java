@@ -69,7 +69,7 @@ class SchedulerServiceDowTest {
     /** Build a league with no team schedule (sufficient for slot estimation). */
     private static League leagueFor(LeagueConfig config, Field field) {
         Division div = division("Majors");
-        return new League(5, config, List.of(div), List.of(field), null, null);
+        return new League(5, config, List.of(div), List.of(field), null, null, List.of());
     }
 
     /**
