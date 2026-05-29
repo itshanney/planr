@@ -4,6 +4,24 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.10.2] — `planr practice view` Rename and Sort Fix
+
+**Spec:** `specs/2026-05-29-practice-view-rename-and-sort.md`
+
+Two targeted fixes to the practice display path. No data model changes, no schema version bump.
+
+### Changed
+
+- **`planr practice status` renamed to `planr practice view`** — Aligns the command name with `planr schedule view` for a consistent CLI surface. The no-arg form (division summary) and `--division <name>` form (slot detail table) are preserved unchanged; only the command token changes. `planr practice status` no longer exists.
+
+- **`planr practice view --division <name>` sort order** — The slot detail table now sorts by assigned date ascending (unassigned slots last), then by assigned start time ascending, then by team name as a stable tiebreaker. Previously the table was sorted only by team name, which produced an unpredictable mix of assigned and unassigned rows.
+
+### Tests
+
+- **`PracticeCommandTest`** — All `execute("practice", "status", ...)` calls updated to `execute("practice", "view", ...)`. Nested classes `StatusSummary` and `StatusDetail` renamed to `ViewSummary` and `ViewDetail`.
+
+---
+
 ## [0.10.1] — Configurable Field Buffer and Scheduling Grid
 
 **PRD:** `features/2026-05-28-configurable-field-buffer.md`

@@ -3,10 +3,22 @@ package org.leagueplan.planr.command;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.leagueplan.planr.model.Division;
+import org.leagueplan.planr.model.League;
+import org.leagueplan.planr.model.PracticeSchedule;
+import org.leagueplan.planr.model.PracticeSlot;
+import org.leagueplan.planr.model.PracticeState;
+import org.leagueplan.planr.model.Team;
+import org.leagueplan.planr.store.LeagueStore;
 
 /**
  * End-to-end command tests for `planr practice`.
@@ -58,6 +70,43 @@ class PracticeCommandTest extends CommandTestBase {
     } finally {
       System.setIn(original);
     }
+  }
+
+  /**
+   * Injects field/time assignments directly into practice slots via LeagueStore, bypassing the
+   * CP-SAT solver. Needed for sort-order tests that require pre-assigned slot state without
+   * running the full assignment pipeline. Teams absent from dateByTeam remain unassigned.
+   */
+  private void injectPracticeAssignments(
+      String divisionName, Map<String, LocalDate> dateByTeam, Map<String, LocalTime> timeByTeam)
+      throws IOException {
+    LeagueStore store = new LeagueStore();
+    League league = store.load();
+    Division division = league.findDivision(divisionName).orElseThrow();
+    PracticeSchedule ps = league.findPracticeSchedule(division.id()).orElseThrow();
+
+    List<PracticeSlot> updatedSlots =
+        ps.slots().stream()
+            .map(
+                slot -> {
+                  String teamName =
+                      division.teams().stream()
+                          .filter(t -> t.id().equals(slot.teamId()))
+                          .findFirst()
+                          .map(Team::name)
+                          .orElse("");
+                  LocalDate date = dateByTeam.get(teamName);
+                  return date != null
+                      ? slot.withAssignment(
+                          date, timeByTeam.getOrDefault(teamName, LocalTime.of(10, 0)), null)
+                      : slot;
+                })
+            .toList();
+
+    league =
+        league.withPracticeScheduleReplaced(
+            division.id(), ps.withSlots(updatedSlots).withState(PracticeState.ASSIGNED));
+    store.save(league);
   }
 
   // ---------------------------------------------------------------------------
@@ -157,7 +206,7 @@ class PracticeCommandTest extends CommandTestBase {
       addTeams("Majors", "Blue Jays", "Cardinals");
 
       execute("practice", "generate");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("GENERATED"));
     }
 
@@ -170,18 +219,18 @@ class PracticeCommandTest extends CommandTestBase {
   }
 
   // ---------------------------------------------------------------------------
-  // practice status (summary)
+  // practice view (summary)
   // ---------------------------------------------------------------------------
 
   @Nested
-  @DisplayName("practice status (summary)")
-  class StatusSummary {
+  @DisplayName("practice view (summary)")
+  class ViewSummary {
 
     @Test
     @DisplayName("shows NOT_CONFIGURED for a division with no practice config")
     void notConfiguredState() {
       execute("division", "add", "Bare", "--duration", "60", "--target", "4");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("NOT_CONFIGURED"));
     }
 
@@ -190,7 +239,7 @@ class PracticeCommandTest extends CommandTestBase {
     void notStartedState() {
       addConfiguredDivision("Majors", 2);
       addTeams("Majors", "Blue Jays", "Cardinals");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("NOT_STARTED"));
     }
 
@@ -200,7 +249,7 @@ class PracticeCommandTest extends CommandTestBase {
       addConfiguredDivision("Majors", 1);
       addTeams("Majors", "Blue Jays", "Cardinals");
       execute("practice", "generate");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("GENERATED"));
     }
 
@@ -210,7 +259,7 @@ class PracticeCommandTest extends CommandTestBase {
       addConfiguredDivision("Majors", 2);
       addTeams("Majors", "Blue Jays", "Cardinals");
       execute("practice", "generate");
-      execute("practice", "status");
+      execute("practice", "view");
       // 2 teams × 2 practices = 4 total; none assigned yet
       assertTrue(stdout().contains("4")); // total count
     }
@@ -218,7 +267,7 @@ class PracticeCommandTest extends CommandTestBase {
     @Test
     @DisplayName("exits 0 with 'No divisions configured' when league is empty")
     void noDivisionsConfigured() {
-      int exit = execute("practice", "status");
+      int exit = execute("practice", "view");
       assertEquals(0, exit);
       assertTrue(stdout().contains("No divisions configured"));
     }
@@ -227,17 +276,17 @@ class PracticeCommandTest extends CommandTestBase {
     @DisplayName("exits 2 on corrupt data file")
     void ioErrorReturns2() throws Exception {
       corruptLeagueFile();
-      assertEquals(2, execute("practice", "status"));
+      assertEquals(2, execute("practice", "view"));
     }
   }
 
   // ---------------------------------------------------------------------------
-  // practice status --division (detail)
+  // practice view --division (detail)
   // ---------------------------------------------------------------------------
 
   @Nested
-  @DisplayName("practice status --division (detail)")
-  class StatusDetail {
+  @DisplayName("practice view --division (detail)")
+  class ViewDetail {
 
     @Test
     @DisplayName("prints per-slot table with team names and UNASSIGNED rows")
@@ -246,7 +295,7 @@ class PracticeCommandTest extends CommandTestBase {
       addTeams("Majors", "Blue Jays", "Cardinals");
       execute("practice", "generate");
 
-      int exit = execute("practice", "status", "--division", "Majors");
+      int exit = execute("practice", "view", "--division", "Majors");
       assertEquals(0, exit);
       assertTrue(stdout().contains("Blue Jays"));
       assertTrue(stdout().contains("Cardinals"));
@@ -260,7 +309,7 @@ class PracticeCommandTest extends CommandTestBase {
       addTeams("Majors", "Blue Jays", "Cardinals");
       execute("practice", "generate");
 
-      execute("practice", "status", "--division", "Majors");
+      execute("practice", "view", "--division", "Majors");
       assertTrue(stdout().contains(PRAC_START));
       assertTrue(stdout().contains(PRAC_END));
     }
@@ -272,7 +321,7 @@ class PracticeCommandTest extends CommandTestBase {
       addTeams("Majors", "Blue Jays");
       execute("practice", "generate");
 
-      execute("practice", "status", "--division", "Majors");
+      execute("practice", "view", "--division", "Majors");
       assertTrue(stdout().contains("1 of 2"));
       assertTrue(stdout().contains("2 of 2"));
     }
@@ -283,14 +332,14 @@ class PracticeCommandTest extends CommandTestBase {
       addConfiguredDivision("Majors", 1);
       addTeams("Majors", "Blue Jays", "Cardinals");
       execute("practice", "generate");
-      int exit = execute("practice", "status", "--division", "majors");
+      int exit = execute("practice", "view", "--division", "majors");
       assertEquals(0, exit);
     }
 
     @Test
     @DisplayName("exits 1 when division does not exist")
     void failsWhenDivisionNotFound() {
-      int exit = execute("practice", "status", "--division", "Ghost");
+      int exit = execute("practice", "view", "--division", "Ghost");
       assertEquals(1, exit);
       assertTrue(stderr().contains("not found"));
     }
@@ -300,9 +349,90 @@ class PracticeCommandTest extends CommandTestBase {
     void failsWhenNoScheduleForDivision() {
       addConfiguredDivision("Majors", 1);
       addTeams("Majors", "Blue Jays", "Cardinals");
-      int exit = execute("practice", "status", "--division", "Majors");
+      int exit = execute("practice", "view", "--division", "Majors");
       assertEquals(1, exit);
       assertTrue(stderr().contains("No practice schedule exists"));
+    }
+
+    @Test
+    @DisplayName("unassigned slots are sorted by team name alphabetically")
+    void unassignedSlotsSortedByTeamName() {
+      addConfiguredDivision("Majors", 1);
+      addTeams("Majors", "Zebras", "Apples", "Mangoes");
+      execute("practice", "generate");
+
+      execute("practice", "view", "--division", "Majors");
+      String out = stdout();
+      assertTrue(out.indexOf("Apples") < out.indexOf("Mangoes"), "Apples before Mangoes");
+      assertTrue(out.indexOf("Mangoes") < out.indexOf("Zebras"), "Mangoes before Zebras");
+    }
+
+    @Test
+    @DisplayName("assigned slots appear before unassigned slots")
+    void assignedSlotsBeforeUnassignedSlots() throws IOException {
+      addConfiguredDivision("Majors", 1);
+      addTeams("Majors", "Cardinals", "Blue Jays");
+      execute("practice", "generate");
+
+      // Assign only Blue Jays; Cardinals stays unassigned
+      injectPracticeAssignments(
+          "Majors",
+          Map.of("Blue Jays", LocalDate.of(2026, 4, 10)),
+          Map.of("Blue Jays", LocalTime.of(10, 0)));
+
+      execute("practice", "view", "--division", "Majors");
+      String out = stdout();
+      assertTrue(out.indexOf("2026-04-10") < out.indexOf("UNASSIGNED"),
+          "assigned date should appear before UNASSIGNED row");
+    }
+
+    @Test
+    @DisplayName("assigned slots are sorted by date ascending")
+    void assignedSlotsSortedByDateAscending() throws IOException {
+      addConfiguredDivision("Majors", 1);
+      addTeams("Majors", "Alpha", "Beta", "Gamma");
+      execute("practice", "generate");
+
+      injectPracticeAssignments(
+          "Majors",
+          Map.of(
+              "Alpha", LocalDate.of(2026, 4, 15),
+              "Beta", LocalDate.of(2026, 4, 10),
+              "Gamma", LocalDate.of(2026, 4, 20)),
+          Map.of(
+              "Alpha", LocalTime.of(10, 0),
+              "Beta", LocalTime.of(10, 0),
+              "Gamma", LocalTime.of(10, 0)));
+
+      execute("practice", "view", "--division", "Majors");
+      String out = stdout();
+      int apr10 = out.indexOf("2026-04-10");
+      int apr15 = out.indexOf("2026-04-15");
+      int apr20 = out.indexOf("2026-04-20");
+      assertTrue(apr10 >= 0 && apr15 >= 0 && apr20 >= 0, "all three dates should appear");
+      assertTrue(apr10 < apr15, "2026-04-10 before 2026-04-15");
+      assertTrue(apr15 < apr20, "2026-04-15 before 2026-04-20");
+    }
+
+    @Test
+    @DisplayName("slots on the same date are sorted by start time ascending")
+    void slotsOnSameDateSortedByStartTimeAscending() throws IOException {
+      addConfiguredDivision("Majors", 1);
+      addTeams("Majors", "Team A", "Team B");
+      execute("practice", "generate");
+
+      // Team A gets 14:00, Team B gets 09:00 — output should be Team B first
+      injectPracticeAssignments(
+          "Majors",
+          Map.of("Team A", LocalDate.of(2026, 4, 10), "Team B", LocalDate.of(2026, 4, 10)),
+          Map.of("Team A", LocalTime.of(14, 0), "Team B", LocalTime.of(9, 0)));
+
+      execute("practice", "view", "--division", "Majors");
+      String out = stdout();
+      int t09 = out.indexOf("09:00");
+      int t14 = out.indexOf("14:00");
+      assertTrue(t09 >= 0 && t14 >= 0, "both times should appear in output");
+      assertTrue(t09 < t14, "09:00 should appear before 14:00");
     }
   }
 
@@ -334,7 +464,7 @@ class PracticeCommandTest extends CommandTestBase {
       execute("practice", "generate");
       clearPractice("Majors", "yes\n");
 
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("NOT_STARTED"));
     }
 
@@ -349,7 +479,7 @@ class PracticeCommandTest extends CommandTestBase {
       assertEquals(0, exit);
       assertTrue(stdout().contains("Cancelled"));
 
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("GENERATED"));
     }
 
@@ -396,7 +526,7 @@ class PracticeCommandTest extends CommandTestBase {
   // ---------------------------------------------------------------------------
 
   @Nested
-  @DisplayName("generate → status → clear lifecycle")
+  @DisplayName("generate → view → clear lifecycle")
   class Lifecycle {
 
     @Test
@@ -405,15 +535,15 @@ class PracticeCommandTest extends CommandTestBase {
       addConfiguredDivision("Majors", 1);
       addTeams("Majors", "Blue Jays", "Cardinals");
 
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("NOT_STARTED"));
 
       execute("practice", "generate");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("GENERATED"));
 
       clearPractice("Majors", "yes\n");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("NOT_STARTED"));
     }
 
@@ -428,7 +558,7 @@ class PracticeCommandTest extends CommandTestBase {
 
       int exit = execute("practice", "generate");
       assertEquals(0, exit);
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("GENERATED"));
     }
 
@@ -453,7 +583,7 @@ class PracticeCommandTest extends CommandTestBase {
       addTeams("Minors", "Red Sox", "Yankees");
 
       execute("practice", "generate");
-      execute("practice", "status");
+      execute("practice", "view");
       assertTrue(stdout().contains("Majors"));
       assertTrue(stdout().contains("Minors"));
     }

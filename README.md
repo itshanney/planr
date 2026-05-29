@@ -43,7 +43,7 @@ planr division edit "Majors" --practice-count 2 --practice-duration-minutes 60 \
   --practice-start 2026-05-15 --practice-end 2026-05-30
 planr practice generate
 echo yes | planr practice assign
-planr practice status --division Majors
+planr practice view --division Majors
 
 # 5. Phase 1 — generate the team schedule (matchups only, no dates yet)
 planr schedule generate
@@ -337,11 +337,11 @@ Clears any prior assignments and runs the CP-SAT solver across all divisions wit
 #### View and manage
 
 ```
-planr practice status [--division <name>]
+planr practice view [--division <name>]
 planr practice clear --division <name>
 ```
 
-- **`status`** — without `--division`: one-line summary per division showing state (`NOT_CONFIGURED`, `NOT_STARTED`, `GENERATED`, `ASSIGNED`) with assigned/total slot counts. With `--division`: per-slot table showing team name, slot number (1 of N, 2 of N, …), date, time, and field (`UNASSIGNED` when not yet assigned).
+- **`view`** — without `--division`: one-line summary per division showing state (`NOT_CONFIGURED`, `NOT_STARTED`, `GENERATED`, `ASSIGNED`) with assigned/total slot counts. With `--division`: per-slot table sorted by assigned date, then time, then team name; assigned slots appear first, unassigned slots trail at the bottom (`UNASSIGNED` when not yet assigned).
 - **`clear`** — removes a division's practice schedule after interactive confirmation, returning it to `NOT_STARTED`. Does not affect other divisions.
 
 **Example**
@@ -355,7 +355,7 @@ $ planr practice generate
 Generated 8 practice slots for Majors (4 teams × 2 practices).
 Practice generation complete: 1 division(s) processed, 8 total slots created.
 
-$ planr practice status --division Majors
+$ planr practice view --division Majors
 Division: Majors | State: GENERATED | Period: 2026-05-15 to 2026-05-30
 
 TEAM        PRACTICE  DATE        TIME   FIELD

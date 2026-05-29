@@ -1,6 +1,7 @@
 package org.leagueplan.planr.command;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,7 +31,7 @@ import picocli.CommandLine.Spec;
     subcommands = {
       PracticeCommand.GenerateCmd.class,
       PracticeCommand.AssignCmd.class,
-      PracticeCommand.StatusCmd.class,
+      PracticeCommand.ViewCmd.class,
       PracticeCommand.ClearCmd.class
     },
     mixinStandardHelpOptions = true)
@@ -242,12 +243,12 @@ public class PracticeCommand implements Runnable {
     }
   }
 
-  // --- Status ---
+  // --- View ---
 
   @Command(
-      name = "status",
+      name = "view",
       description = "View practice status. Use --division for full slot detail.")
-  static class StatusCmd implements Callable<Integer> {
+  static class ViewCmd implements Callable<Integer> {
 
     @ParentCommand PracticeCommand parent;
 
@@ -342,10 +343,15 @@ public class PracticeCommand implements Runnable {
     }
 
     private void printDetail(PracticeSchedule ps, Division division, League league) {
-      List<PracticeSlot> slots =
-          ps.slots().stream()
-              .sorted(Comparator.comparing(s -> resolveTeamName(division, s.teamId())))
-              .toList();
+      Comparator<PracticeSlot> slotOrder =
+          Comparator.<PracticeSlot, LocalDate>comparing(
+                  PracticeSlot::assignedDate, Comparator.nullsLast(Comparator.naturalOrder()))
+              .thenComparing(
+                  PracticeSlot::assignedStartTime,
+                  Comparator.nullsLast(Comparator.naturalOrder()))
+              .thenComparing(
+                  s -> resolveTeamName(division, s.teamId()), String.CASE_INSENSITIVE_ORDER);
+      List<PracticeSlot> slots = ps.slots().stream().sorted(slotOrder).toList();
 
       int teamW =
           Math.max(
