@@ -174,18 +174,22 @@ public class ScheduleGameCommand implements Runnable {
         Schedule updatedSchedule = schedule.withGameReplaced(zeroIndex, updated);
 
         // Non-blocking conflict warning: check for field overlap on same date
+        int bufferMinutes =
+            (league.config() != null && league.config().fieldBufferMinutes() != null)
+                ? league.config().fieldBufferMinutes()
+                : 0;
         LocalDate checkDate = updated.date();
         UUID checkFieldId = updated.fieldId();
         for (int i = 0; i < updatedSchedule.games().size(); i++) {
           if (i == zeroIndex) continue;
           ScheduledGame other = updatedSchedule.games().get(i);
           if (!other.date().equals(checkDate) || !other.fieldId().equals(checkFieldId)) continue;
-          if (gamesConflict(updated, other)) {
+          if (gamesConflict(updated, other, bufferMinutes)) {
             System.err.printf(
                 "Warning: Game #%d now conflicts with game #%d at %s on %s%n"
-                    + "         (overlapping times including the 15-minute buffer). "
+                    + "         (overlapping times with %d-minute buffer). "
                     + "Game #%d saved anyway.%n",
-                gameNumber, i + 1, updated.fieldName(), checkDate, gameNumber);
+                gameNumber, i + 1, updated.fieldName(), checkDate, bufferMinutes, gameNumber);
             break;
           }
         }
@@ -216,11 +220,11 @@ public class ScheduleGameCommand implements Runnable {
           .findFirst();
     }
 
-    private boolean gamesConflict(ScheduledGame a, ScheduledGame b) {
+    private boolean gamesConflict(ScheduledGame a, ScheduledGame b, int bufferMinutes) {
       int aStart = a.startTime().getHour() * 60 + a.startTime().getMinute();
-      int aEnd = aStart + a.gameDurationMinutes() + 15;
+      int aEnd = aStart + a.gameDurationMinutes() + bufferMinutes;
       int bStart = b.startTime().getHour() * 60 + b.startTime().getMinute();
-      int bEnd = bStart + b.gameDurationMinutes() + 15;
+      int bEnd = bStart + b.gameDurationMinutes() + bufferMinutes;
       return aStart < bEnd && bStart < aEnd;
     }
   }

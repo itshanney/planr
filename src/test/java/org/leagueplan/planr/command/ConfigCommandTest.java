@@ -206,6 +206,146 @@ class ConfigCommandTest extends CommandTestBase {
       assertEquals(2, exit);
       assertTrue(stderr().contains("Failed to access league data"));
     }
+
+    // --field-buffer-minutes
+
+    @Test
+    @DisplayName("exits 0 when setting field-buffer-minutes to 0 (back-to-back allowed)")
+    void setsFieldBufferToZero() {
+      int exit = execute("config", "set", "--field-buffer-minutes", "0");
+      assertEquals(0, exit);
+      assertTrue(stdout().contains("updated"));
+    }
+
+    @Test
+    @DisplayName("exits 0 when setting field-buffer-minutes to a positive integer")
+    void setsFieldBufferToPositiveValue() {
+      int exit = execute("config", "set", "--field-buffer-minutes", "15");
+      assertEquals(0, exit);
+      assertTrue(stdout().contains("updated"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when field-buffer-minutes is negative")
+    void failsWhenFieldBufferIsNegative() {
+      int exit = execute("config", "set", "--field-buffer-minutes", "-1");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("non-negative integer"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when field-buffer-minutes is not a valid integer")
+    void failsWhenFieldBufferIsNotAnInteger() {
+      int exit = execute("config", "set", "--field-buffer-minutes", "abc");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("non-negative integer"));
+    }
+
+    @Test
+    @DisplayName("persists field-buffer-minutes so it appears in config show")
+    void persistsFieldBufferMinutes() {
+      execute("config", "set", "--field-buffer-minutes", "10");
+      execute("config", "show");
+      assertTrue(stdout().contains("10 min"));
+    }
+
+    @Test
+    @DisplayName("field-buffer-minutes merges with existing config without touching other fields")
+    void fieldBufferMergesWithExistingConfig() {
+      execute("config", "set", "--sunrise", "08:00");
+      execute("config", "set", "--field-buffer-minutes", "20");
+      execute("config", "show");
+      String out = stdout();
+      assertTrue(out.contains("08:00"), "sunrise should be preserved");
+      assertTrue(out.contains("20 min"), "field buffer should be set");
+    }
+
+    // --grid-minutes
+
+    @Test
+    @DisplayName("exits 0 when setting grid-minutes to 30 (the default value)")
+    void setsGridToThirty() {
+      int exit = execute("config", "set", "--grid-minutes", "30");
+      assertEquals(0, exit);
+      assertTrue(stdout().contains("updated"));
+    }
+
+    @Test
+    @DisplayName("exits 0 when setting grid-minutes to 15")
+    void setsGridToFifteen() {
+      int exit = execute("config", "set", "--grid-minutes", "15");
+      assertEquals(0, exit);
+    }
+
+    @Test
+    @DisplayName("exits 0 when setting grid-minutes to 60 (one game per hour)")
+    void setsGridToSixty() {
+      int exit = execute("config", "set", "--grid-minutes", "60");
+      assertEquals(0, exit);
+    }
+
+    @Test
+    @DisplayName("exits 0 when setting grid-minutes to 1 (finest granularity)")
+    void setsGridToOne() {
+      int exit = execute("config", "set", "--grid-minutes", "1");
+      assertEquals(0, exit);
+    }
+
+    @Test
+    @DisplayName("exits 1 when grid-minutes is 0")
+    void failsWhenGridIsZero() {
+      int exit = execute("config", "set", "--grid-minutes", "0");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("evenly divides 60"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when grid-minutes is negative")
+    void failsWhenGridIsNegative() {
+      int exit = execute("config", "set", "--grid-minutes", "-5");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("evenly divides 60"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when grid-minutes does not evenly divide 60 (7 is rejected)")
+    void failsWhenGridDoesNotDivideSixty() {
+      int exit = execute("config", "set", "--grid-minutes", "7");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("evenly divides 60"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when grid-minutes exceeds 60 (120 is rejected)")
+    void failsWhenGridExceedsSixty() {
+      int exit = execute("config", "set", "--grid-minutes", "120");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("evenly divides 60"));
+    }
+
+    @Test
+    @DisplayName("exits 1 when grid-minutes is not a valid integer")
+    void failsWhenGridIsNotAnInteger() {
+      int exit = execute("config", "set", "--grid-minutes", "half");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("evenly divides 60"));
+    }
+
+    @Test
+    @DisplayName("persists grid-minutes so it appears in config show")
+    void persistsGridMinutes() {
+      execute("config", "set", "--grid-minutes", "15");
+      execute("config", "show");
+      assertTrue(stdout().contains("15 min"));
+    }
+
+    @Test
+    @DisplayName("field-buffer-minutes and grid-minutes can be set together")
+    void setsFieldBufferAndGridTogether() {
+      int exit = execute("config", "set", "--field-buffer-minutes", "0", "--grid-minutes", "30");
+      assertEquals(0, exit);
+      assertTrue(stdout().contains("updated"));
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -319,6 +459,102 @@ class ConfigCommandTest extends CommandTestBase {
       int exit = execute("config", "show");
       assertEquals(2, exit);
       assertTrue(stderr().contains("Failed to access league data"));
+    }
+
+    @Test
+    @DisplayName("shows Field buffer and Grid interval labels")
+    void showsBufferAndGridLabels() {
+      execute("config", "show");
+      String out = stdout();
+      assertTrue(out.contains("Field buffer"), "should show 'Field buffer' label");
+      assertTrue(out.contains("Grid interval"), "should show 'Grid interval' label");
+    }
+
+    @Test
+    @DisplayName("shows (default) for field-buffer-minutes when not explicitly set")
+    void showsDefaultLabelForFieldBuffer() {
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Field buffer"))
+              .anyMatch(l -> l.contains("(default)")),
+          "unset field buffer should display '(default)'");
+    }
+
+    @Test
+    @DisplayName("shows (default) for grid-minutes when not explicitly set")
+    void showsDefaultLabelForGridInterval() {
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Grid interval"))
+              .anyMatch(l -> l.contains("(default)")),
+          "unset grid interval should display '(default)'");
+    }
+
+    @Test
+    @DisplayName("field buffer default value is 0 min")
+    void fieldBufferDefaultIsZero() {
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Field buffer"))
+              .anyMatch(l -> l.contains("0 min")),
+          "default field buffer should display '0 min'");
+    }
+
+    @Test
+    @DisplayName("grid interval default value is 30 min")
+    void gridIntervalDefaultIsThirty() {
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Grid interval"))
+              .anyMatch(l -> l.contains("30 min")),
+          "default grid interval should display '30 min'");
+    }
+
+    @Test
+    @DisplayName("shows explicit value without (default) for field-buffer-minutes when set")
+    void showsExplicitFieldBufferValue() {
+      execute("config", "set", "--field-buffer-minutes", "10");
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Field buffer"))
+              .anyMatch(l -> l.contains("10 min") && !l.contains("(default)")),
+          "explicit field buffer should show value without '(default)'");
+    }
+
+    @Test
+    @DisplayName("shows explicit value without (default) for grid-minutes when set")
+    void showsExplicitGridIntervalValue() {
+      execute("config", "set", "--grid-minutes", "15");
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Grid interval"))
+              .anyMatch(l -> l.contains("15 min") && !l.contains("(default)")),
+          "explicit grid interval should show value without '(default)'");
+    }
+
+    @Test
+    @DisplayName("field buffer 0 when explicitly set shows '0 min' without (default)")
+    void showsExplicitZeroFieldBuffer() {
+      execute("config", "set", "--field-buffer-minutes", "0");
+      execute("config", "show");
+      assertTrue(
+          stdout()
+              .lines()
+              .filter(l -> l.contains("Field buffer"))
+              .anyMatch(l -> l.contains("0 min") && !l.contains("(default)")),
+          "explicitly set 0 should not show '(default)'");
     }
   }
 }

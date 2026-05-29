@@ -32,7 +32,7 @@ import org.leagueplan.planr.model.TeamSchedule;
 class SchedulerServiceTest {
 
   private static final LocalDate SEASON_START = LocalDate.of(2026, 6, 1);
-  // June–August: 91 days, 33 slots/day with 09:00-18:00 config and 15-min grid.
+  // June–August: 91 days, 17 slots/day with 09:00-18:00 config and 30-min grid.
   private static final LocalDate SEASON_END = LocalDate.of(2026, 8, 31);
   // Short 7-day season used in infeasibility tests: narrow config (1 slot/day) × 7 days = 7 slots <
   // 12.
@@ -48,6 +48,8 @@ class SchedulerServiceTest {
           List.of(),
           List.of(),
           null,
+          null,
+          null,
           null);
   // Narrow config: fields open 09:00–10:00 → exactly 1 slot/day for 60-min games.
   // Season dates are set to SEASON_START/SEASON_END; generateShort() swaps in SHORT_SEASON_END.
@@ -59,6 +61,8 @@ class SchedulerServiceTest {
           SEASON_END,
           List.of(),
           List.of(),
+          null,
+          null,
           null,
           null);
 
@@ -138,6 +142,8 @@ class SchedulerServiceTest {
             SHORT_SEASON_END,
             List.of(),
             List.of(),
+            null,
+            null,
             null,
             null);
     League shortLeague =
@@ -253,11 +259,14 @@ class SchedulerServiceTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  @DisplayName("no two games on the same field overlap including the 15-minute buffer")
+  @DisplayName("no two games on the same field overlap (respects the configured field buffer)")
   void noFieldConflictsIncludingBuffer() {
     ScheduleResult result = generate(fourTeamLeague());
     assertInstanceOf(ScheduleResult.Success.class, result);
     List<ScheduledGame> games = ((ScheduleResult.Success) result).games();
+
+    // fourTeamLeague() uses CONFIG which has null fieldBufferMinutes → default = 0
+    int buffer = SchedulerService.DEFAULT_FIELD_BUFFER_MINUTES;
 
     for (int i = 0; i < games.size(); i++) {
       ScheduledGame a = games.get(i);
@@ -265,9 +274,9 @@ class SchedulerServiceTest {
         ScheduledGame b = games.get(j);
         if (!a.fieldId().equals(b.fieldId()) || !a.date().equals(b.date())) continue;
         int aStart = toMinutes(a.startTime());
-        int aEnd = aStart + a.gameDurationMinutes() + 15;
+        int aEnd = aStart + a.gameDurationMinutes() + buffer;
         int bStart = toMinutes(b.startTime());
-        int bEnd = bStart + b.gameDurationMinutes() + 15;
+        int bEnd = bStart + b.gameDurationMinutes() + buffer;
         assertFalse(
             aStart < bEnd && bStart < aEnd,
             "Field conflict: games "
@@ -528,6 +537,8 @@ class SchedulerServiceTest {
             List.of(),
             List.of(),
             null,
+            null,
+            null,
             null);
     Team t1 = team("A"), t2 = team("B"), t3 = team("C"), t4 = team("D");
     Division div = division("Majors", 60, t1, t2, t3, t4);
@@ -682,6 +693,8 @@ class SchedulerServiceTest {
             List.of(),
             List.of(),
             1,
+            null,
+            null,
             null);
 
     Team t1 = team("Blue Jays"), t2 = team("Cardinals");
@@ -789,7 +802,9 @@ class SchedulerServiceTest {
             List.of(),
             List.of(),
             null,
-            0);
+            0,
+            null,
+            null);
 
     Team t1 = team("Blue Jays"), t2 = team("Cardinals");
     Division div = division("Majors", 60, t1, t2);
@@ -1012,6 +1027,8 @@ class SchedulerServiceTest {
             List.of(),
             List.of(),
             null,
+            null,
+            null,
             null);
 
     League twoFieldLeague =
@@ -1057,14 +1074,17 @@ class SchedulerServiceTest {
             List.of(),
             List.of(),
             null,
+            null,
+            null,
             null);
 
     League l = league(twoMonthConfig, List.of(majors), List.of(fieldA, fieldB));
     int totalSlots = new SchedulerService().estimateAvailableSlots(l, majorsId, 60);
 
     // In June (30 days), only Field A is usable; in July (31 days), only Field B is usable.
-    // Global window 09:00–18:00, 60-min games, 15-min grid: (9h×60 − 60) / 15 + 1 = 33 slots/day.
-    int slotsPerFieldPerDay = ((18 - 9) * 60 - 60) / 15 + 1;
+    // Global window 09:00–18:00, 60-min games, default 30-min grid.
+    int grid = SchedulerService.DEFAULT_GRID_MINUTES;
+    int slotsPerFieldPerDay = ((18 - 9) * 60 - 60) / grid + 1;
     int expected = 30 * slotsPerFieldPerDay + 31 * slotsPerFieldPerDay;
 
     assertEquals(

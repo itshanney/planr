@@ -27,7 +27,7 @@ class LeagueTest {
   @DisplayName("empty() returns current version with no divisions or fields")
   void empty_hasCurrentVersionAndNoContent() {
     League empty = League.empty();
-    assertEquals(8, empty.version());
+    assertEquals(9, empty.version());
     assertTrue(empty.divisions().isEmpty());
     assertTrue(empty.fields().isEmpty());
   }

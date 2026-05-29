@@ -42,9 +42,9 @@ public class SchedulerService {
 
   public static final int DEFAULT_MAX_GAMES_PER_WEEK = 2;
   public static final int DEFAULT_MIN_REST_DAYS = 1;
+  public static final int DEFAULT_FIELD_BUFFER_MINUTES = 0;
+  public static final int DEFAULT_GRID_MINUTES = 30;
 
-  private static final int BUFFER_MINUTES = 15;
-  private static final int GRID_MINUTES = 15;
   private static final int SOLVER_TIME_LIMIT_SECONDS = 300;
 
   private record GameVar(BoolVar var, Fixture fixture, Slot slot) {}
@@ -115,6 +115,12 @@ public class SchedulerService {
       return 0;
     }
 
+    int bufferMinutes =
+        (config.fieldBufferMinutes() != null)
+            ? config.fieldBufferMinutes()
+            : DEFAULT_FIELD_BUFFER_MINUTES;
+    int gridMinutes = (config.gridMinutes() != null) ? config.gridMinutes() : DEFAULT_GRID_MINUTES;
+
     int total = 0;
     for (LocalDate date = config.seasonStart();
         !date.isAfter(config.seasonEnd());
@@ -132,9 +138,9 @@ public class SchedulerService {
 
         for (LocalTime[] window : subtractBlocks(openWindow[0], openWindow[1], dateBlocks)) {
           LocalTime slotStart = window[0];
-          while (!slotStart.plusMinutes(gameDurationMinutes).isAfter(window[1])) {
+          while (!slotStart.plusMinutes(gameDurationMinutes + bufferMinutes).isAfter(window[1])) {
             total++;
-            slotStart = slotStart.plusMinutes(GRID_MINUTES);
+            slotStart = slotStart.plusMinutes(gridMinutes);
           }
         }
       }
@@ -158,6 +164,8 @@ public class SchedulerService {
       return slotsByDiv;
     }
 
+    int gridMinutes = (config.gridMinutes() != null) ? config.gridMinutes() : DEFAULT_GRID_MINUTES;
+
     for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
       final LocalDate currentDate = date;
       for (Field field : league.fields()) {
@@ -177,7 +185,7 @@ public class SchedulerService {
             LocalTime slotStart = window[0];
             while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
-              slotStart = slotStart.plusMinutes(GRID_MINUTES);
+              slotStart = slotStart.plusMinutes(gridMinutes);
             }
           }
         }
@@ -329,6 +337,16 @@ public class SchedulerService {
       Map<UUID, Integer> slotCounts,
       long startMs) {
 
+    LeagueConfig config = league.config();
+    int bufferMinutes =
+        (config != null && config.fieldBufferMinutes() != null)
+            ? config.fieldBufferMinutes()
+            : DEFAULT_FIELD_BUFFER_MINUTES;
+    int gridMinutes =
+        (config != null && config.gridMinutes() != null)
+            ? config.gridMinutes()
+            : DEFAULT_GRID_MINUTES;
+
     CpModel model = new CpModel();
 
     List<GameVar> allGameVars = new ArrayList<>();
@@ -354,12 +372,11 @@ public class SchedulerService {
           allGameVars.add(gv);
           byFixture.get(fixture.gameId()).add(gv);
 
-          // Register this game under every 15-min tick it would occupy (start through
-          // end-exclusive)
+          // Register this game under every grid tick it would occupy (start through end-exclusive)
           int gameStart = slot.startMinutes();
-          int gameEnd = gameStart + fixture.gameDurationMinutes() + BUFFER_MINUTES;
+          int gameEnd = gameStart + fixture.gameDurationMinutes() + bufferMinutes;
           String fieldDate = slot.fieldId() + "|" + slot.date() + "|";
-          for (int t = gameStart; t < gameEnd; t += GRID_MINUTES) {
+          for (int t = gameStart; t < gameEnd; t += gridMinutes) {
             byFieldTick.computeIfAbsent(fieldDate + t, k -> new ArrayList<>()).add(var);
           }
 
@@ -422,7 +439,6 @@ public class SchedulerService {
     IntVar totalAssignedVar = model.newIntVar(0, totalFixtures, "total_assigned");
     model.addEquality(totalAssignedVar, LinearExpr.sum(allAssignedLits));
 
-    LeagueConfig config = league.config();
     int weekCap =
         (config != null && config.maxGamesPerWeek() != null)
             ? config.maxGamesPerWeek()
@@ -637,6 +653,8 @@ public class SchedulerService {
       return slotsByDiv;
     }
 
+    int gridMinutes = (config.gridMinutes() != null) ? config.gridMinutes() : DEFAULT_GRID_MINUTES;
+
     for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
       final LocalDate currentDate = date;
       for (Field field : league.fields()) {
@@ -655,7 +673,7 @@ public class SchedulerService {
             LocalTime slotStart = window[0];
             while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
-              slotStart = slotStart.plusMinutes(GRID_MINUTES);
+              slotStart = slotStart.plusMinutes(gridMinutes);
             }
           }
         }
@@ -670,6 +688,16 @@ public class SchedulerService {
       Map<UUID, List<Slot>> slotsByDiv,
       Map<UUID, Integer> slotCounts,
       long startMs) {
+
+    LeagueConfig config = league.config();
+    int bufferMinutes =
+        (config != null && config.fieldBufferMinutes() != null)
+            ? config.fieldBufferMinutes()
+            : DEFAULT_FIELD_BUFFER_MINUTES;
+    int gridMinutes =
+        (config != null && config.gridMinutes() != null)
+            ? config.gridMinutes()
+            : DEFAULT_GRID_MINUTES;
 
     CpModel model = new CpModel();
 
@@ -694,9 +722,9 @@ public class SchedulerService {
           byFixture.get(fixture.gameId()).add(gv);
 
           int gameStart = slot.startMinutes();
-          int gameEnd = gameStart + fixture.gameDurationMinutes() + BUFFER_MINUTES;
+          int gameEnd = gameStart + fixture.gameDurationMinutes() + bufferMinutes;
           String fieldDate = slot.fieldId() + "|" + slot.date() + "|";
-          for (int t = gameStart; t < gameEnd; t += GRID_MINUTES) {
+          for (int t = gameStart; t < gameEnd; t += gridMinutes) {
             byFieldTick.computeIfAbsent(fieldDate + t, k -> new ArrayList<>()).add(var);
           }
 
@@ -756,7 +784,6 @@ public class SchedulerService {
     IntVar totalAssignedVar = model.newIntVar(0, totalFixtures, "total_assigned");
     model.addEquality(totalAssignedVar, LinearExpr.sum(allAssignedLits));
 
-    LeagueConfig config = league.config();
     int weekCap =
         (config != null && config.maxGamesPerWeek() != null)
             ? config.maxGamesPerWeek()
@@ -916,6 +943,8 @@ public class SchedulerService {
       return slotsByDiv;
     }
 
+    int gridMinutes = (config.gridMinutes() != null) ? config.gridMinutes() : DEFAULT_GRID_MINUTES;
+
     // Iterate the union of all practice windows to avoid redundant field/date passes.
     LocalDate globalStart =
         divisionWindows.values().stream()
@@ -950,7 +979,7 @@ public class SchedulerService {
             LocalTime slotStart = avWindow[0];
             while (!slotStart.plusMinutes(duration).isAfter(avWindow[1])) {
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
-              slotStart = slotStart.plusMinutes(GRID_MINUTES);
+              slotStart = slotStart.plusMinutes(gridMinutes);
             }
           }
         }
@@ -965,6 +994,16 @@ public class SchedulerService {
       Map<UUID, List<Slot>> slotsByDiv,
       Map<UUID, Integer> slotCounts,
       long startMs) {
+
+    LeagueConfig config = league.config();
+    int bufferMinutes =
+        (config != null && config.fieldBufferMinutes() != null)
+            ? config.fieldBufferMinutes()
+            : DEFAULT_FIELD_BUFFER_MINUTES;
+    int gridMinutes =
+        (config != null && config.gridMinutes() != null)
+            ? config.gridMinutes()
+            : DEFAULT_GRID_MINUTES;
 
     CpModel model = new CpModel();
 
@@ -989,9 +1028,9 @@ public class SchedulerService {
           byFixture.get(fixture.slotId()).add(pv);
 
           int practiceStart = slot.startMinutes();
-          int practiceEnd = practiceStart + fixture.durationMinutes() + BUFFER_MINUTES;
+          int practiceEnd = practiceStart + fixture.durationMinutes() + bufferMinutes;
           String fieldDate = slot.fieldId() + "|" + slot.date() + "|";
-          for (int t = practiceStart; t < practiceEnd; t += GRID_MINUTES) {
+          for (int t = practiceStart; t < practiceEnd; t += gridMinutes) {
             byFieldTick.computeIfAbsent(fieldDate + t, k -> new ArrayList<>()).add(var);
           }
 
@@ -1046,7 +1085,6 @@ public class SchedulerService {
     IntVar totalAssignedVar = model.newIntVar(0, totalFixtures, "total_assigned");
     model.addEquality(totalAssignedVar, LinearExpr.sum(allAssignedLits));
 
-    LeagueConfig config = league.config();
     int weekCap =
         (config != null && config.maxGamesPerWeek() != null)
             ? config.maxGamesPerWeek()

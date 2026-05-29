@@ -4,7 +4,7 @@
 
 `planr` is a Java 25 CLI for little-league schedule management. All state lives in a single JSON file. The test suite validates two distinct concerns: (1) **business logic** in model types and scheduler services, and (2) **command behavior** — the full input/output/exit-code contract of every CLI command.
 
-**Total: ~750 test methods across 23 test classes.**
+**Total: 772 test methods across 25 test classes.**
 
 ---
 
@@ -50,7 +50,7 @@ Tests for Java records that represent core domain entities.
 |---|---|---|
 | `LeagueTest.java` | 14 | `League` compact constructor (null normalization), migration version assertion, `withX(...)` builder round-trips |
 | `DivisionTest.java` | 13 | `Division` record construction, `practiceCount`/`practiceDurationMinutes`/`practiceStart`/`practiceEnd` field accessors |
-| `LeagueConfigTest.java` | 16 | `LeagueConfig` defaults, day-of-week availability, field lock constraints |
+| `LeagueConfigTest.java` | 25 | `LeagueConfig` defaults, null normalization, DOW window and blocked-day builders, `withFieldBufferMinutes`/`withGridMinutes` — value, null sentinel, immutability, field threading |
 
 ### Unit tests — scheduler layer
 
@@ -58,17 +58,28 @@ Tests for stateless service classes that contain algorithm logic.
 
 | File | Tests | What it covers |
 |---|---|---|
-| `PlayoffBracketServiceTest.java` | 29 | `generateBracket()` for all N in [2,16]: no crash, exactly 1 conditional, bye count = `nextPowerOfTwo(N) - N`, unique game IDs; per-N slot count assertions; `toPlayoffGame()` field preservation; determinism |
+| `PlayoffBracketServiceTest.java` | 88 | `generateBracket()` for all N in [2,16]: no crash, exactly 1 conditional, bye count = `nextPowerOfTwo(N) - N`, unique game IDs; per-N slot count assertions; `toPlayoffGame()` field preservation; determinism |
 | `TeamScheduleServiceTest.java` | 20 | Circle-method round-robin, fill-round generation, home/away balance, `TeamScheduleResult` sealed type |
-| `SchedulerServiceTest.java` | 36 | CP-SAT field/time assignment, `estimateAvailableSlots()`, multi-division solves, constraint satisfaction |
-| `SchedulerServiceDowTest.java` | 10 | Day-of-week availability constraints in CP-SAT model |
+| `SchedulerServiceTest.java` | 36 | CP-SAT field/time assignment, `estimateAvailableSlots()`, multi-division solves, constraint satisfaction (field non-overlap uses configured buffer constant) |
+| `SchedulerServiceDowTest.java` | 10 | Day-of-week availability and blocked-day constraints in `estimateAvailableSlots()` |
+| `SchedulerServiceBufferGridTest.java` | 23 | Configurable `fieldBufferMinutes` and `gridMinutes` in `estimateAvailableSlots()` and `assign()` — see detail below |
 | `DayParserTest.java` | 29 | `"Mon"/"Monday"/"MONDAY"` parsing, invalid input, full-week vs. single-day parsing |
+
+#### `SchedulerServiceBufferGridTest` detail
+
+| Nested class | Tests | What it covers |
+|---|---|---|
+| `FieldBuffer` | 7 | null = default 0; buffer=0 and buffer=30 slot counts match formula; exact boundary (duration + buffer == window); oversized buffer → 0 slots; multi-day consistency |
+| `GridMinutes` | 8 | null = default 30; grid=30/15/60/1 slot counts match formula; coarser grid → fewer slots; multi-day consistency |
+| `BufferAndGridCombined` | 3 | combined formula (buffer=30 + grid=60); 2-hour window + buffer=60 → 1 slot; 2-hour window + buffer=0 → 3 slots |
+| `AssignFieldNonOverlap` | 2 | buffer=0 allows two 60-min games back-to-back (solver); buffer=60 prevents second game in same 2-hour window (solver) |
+| `AssignGridAlignment` | 3 | grid=60 → all start times on the hour; grid=30 → :00/:30 only; grid=15 → :15/:45 permitted (solver) |
 
 ### Store tests
 
 | File | Tests | What it covers |
 |---|---|---|
-| `LeagueStoreTest.java` | 19 | Atomic write (`ATOMIC_MOVE`), schema migration v1→v8, round-trip serialization of all field types, corrupt-file error handling, `LocalTime` serialized as `"HH:mm"`, `DayOfWeek` as string |
+| `LeagueStoreTest.java` | 19 | Atomic write (`ATOMIC_MOVE`), schema migration v1→v9, round-trip serialization of all field types, corrupt-file error handling, `LocalTime` serialized as `"HH:mm"`, `DayOfWeek` as string |
 
 ### Command tests — CLI end-to-end
 
@@ -83,7 +94,7 @@ Each command test class runs the full picocli dispatch stack, reads/writes real 
 | `FieldBlockCommandTest.java` | 28 | `field block add/edit/list/delete` — block periods, overlap detection |
 | `FieldOverrideCommandTest.java` | 28 | `field override add/edit/list/delete` — date-specific overrides |
 | `FieldLockCommandTest.java` | 27 | `field lock add/list/delete` — division-to-field locking for CP-SAT |
-| `ConfigCommandTest.java` | 31 | `config set/show` — season start/end, sunrise/sunset, rest days, max games per week |
+| `ConfigCommandTest.java` | 56 | `config set/show` — season start/end, sunrise/sunset, rest days, max games per week, `--field-buffer-minutes` (valid: 0/positive; invalid: negative/non-integer; persistence), `--grid-minutes` (valid divisors of 60; invalid: 0/negative/non-divisor/non-integer; persistence), `config show` default labels and explicit values for both new fields |
 | `ConfigDowCommandTest.java` | 24 | `config dow` — day-of-week scheduling availability |
 | `ConfigBlockdayCommandTest.java` | 19 | `config blockday add/list/delete` — league-wide date blocks |
 | `ConfigShowDowBlockdayTest.java` | 11 | `config show` output for dow and blockday configuration |
@@ -102,12 +113,13 @@ Each command test class runs the full picocli dispatch stack, reads/writes real 
 | Team CRUD | TeamCommandTest | — | Full coverage |
 | Field CRUD + blocks/overrides/locks | FieldCommandTest, FieldBlockCommandTest, FieldOverrideCommandTest, FieldLockCommandTest | — | Full coverage |
 | Config (season, DOW, blockdays) | ConfigCommandTest, ConfigDowCommandTest, ConfigBlockdayCommandTest, ConfigShowDowBlockdayTest | LeagueConfigTest | Full coverage |
+| Config (field buffer, grid interval) | ConfigCommandTest | LeagueConfigTest, SchedulerServiceBufferGridTest | Full coverage — set/validate/show/persist for both options; solver behavior verified |
 | Schedule generation (phase 1) | ScheduleCommandTest | TeamScheduleServiceTest | Full coverage |
-| Schedule assignment (phase 2, CP-SAT) | ScheduleCommandTest | SchedulerServiceTest, SchedulerServiceDowTest | Core paths covered; see gaps |
+| Schedule assignment (phase 2, CP-SAT) | ScheduleCommandTest | SchedulerServiceTest, SchedulerServiceDowTest, SchedulerServiceBufferGridTest | Core paths covered; see gaps |
 | Schedule stats | ScheduleCommandStatsTest | — | Full coverage |
 | Playoff bracket | PlayoffCommandTest | PlayoffBracketServiceTest | Full coverage of structure invariants |
 | Practice scheduling | PracticeCommandTest, DivisionCommandPracticeTest | — | generate/status/clear covered; assign excluded |
-| Persistence / migration | — | LeagueStoreTest, LeagueTest | All 8 schema versions tested |
+| Persistence / migration | — | LeagueStoreTest, LeagueTest | Schema versions v1–v9 tested |
 
 ---
 
@@ -135,14 +147,18 @@ Both commands involve an interactive confirmation prompt followed by a CP-SAT so
 
 `SchedulerServiceTest` covers some infeasibility scenarios but not timeout behavior or partial-solve degradation under extreme constraint combinations (many divisions, many fields with conflicting locks).
 
+### `schedule game override` conflict warning with custom buffer
+
+`ScheduleGameCommand.gamesConflict()` reads `fieldBufferMinutes` from the loaded league config and warns when an override would create a conflict. The warning path is tested manually but not covered by automated command tests (would require generating, finalizing, then overriding a game into a known conflict). The core logic is covered at the unit level by `SchedulerServiceBufferGridTest`.
+
 ---
 
 ## Test Count Summary
 
-| Category | Files | Approx. tests |
+| Category | Files | Tests |
 |---|---|---|
-| Model unit tests | 3 | 43 |
-| Scheduler unit tests | 5 | 124 |
+| Model unit tests | 3 | 52 |
+| Scheduler unit tests | 6 | 206 |
 | Store tests | 1 | 19 |
-| Command end-to-end tests | 15 | ~570 |
-| **Total** | **24** | **~756** |
+| Command end-to-end tests | 15 | 495 |
+| **Total** | **25** | **772** |

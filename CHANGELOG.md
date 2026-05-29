@@ -4,6 +4,50 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.10.1] — Configurable Field Buffer and Scheduling Grid
+
+**PRD:** `features/2026-05-28-configurable-field-buffer.md`
+**Spec:** `specs/2026-05-28-configurable-field-buffer.md`
+
+Makes the field turnaround buffer and start-time grid interval configurable at the league level via `planr config set`. Previously both values were hardcoded in `SchedulerService` (buffer: 15 min, grid: 15 min). After this change the defaults are buffer = 0 (back-to-back games allowed) and grid = 30 minutes; existing leagues that do not configure explicit values will use the new defaults. Schema advances from v8 to v9.
+
+### Added
+
+- **`planr config set --field-buffer-minutes <N>`** — Sets the minimum turnover gap (in minutes) enforced between consecutive games on the same field. Validated as a non-negative integer (≥ 0; 0 means back-to-back games are allowed). Stored as a nullable `Integer` on `LeagueConfig`; null means "use the system default of 0." Merges with other config fields on each `set` call.
+
+- **`planr config set --grid-minutes <N>`** — Sets the step size (in minutes) used to advance the start-time cursor when enumerating candidate slots. Validated as a positive integer that evenly divides 60 (valid values: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60). Stored as a nullable `Integer` on `LeagueConfig`; null means "use the system default of 30." Merges with other config fields on each `set` call.
+
+- **`SchedulerService.DEFAULT_FIELD_BUFFER_MINUTES = 0`** and **`DEFAULT_GRID_MINUTES = 30`** — Public constants used by the solver (as fallback defaults) and `ConfigCommand.ShowCmd` (to render `(default)` labels in `config show`).
+
+### Changed
+
+- **`planr config show`** — Renders two new lines after `Min rest days:`: `Field buffer: N min` and `Grid interval: N min`. Each line appends `(default)` when the value has not been explicitly configured; no suffix when explicitly set.
+
+- **`LeagueConfig` record** — Gains two new nullable fields: `Integer fieldBufferMinutes` (position 9) and `Integer gridMinutes` (position 10). Compact constructor leaves both as `null` (does not normalize to defaults, so `config show` can distinguish "not set" from "explicitly set to the default value"). New mutation helpers: `withFieldBufferMinutes(Integer)` and `withGridMinutes(Integer)`.
+
+- **`SchedulerService`** — Removes hardcoded `BUFFER_MINUTES = 15` and `GRID_MINUTES = 15` constants. Both values are now derived at call time from `league.config()`, falling back to `DEFAULT_FIELD_BUFFER_MINUTES` and `DEFAULT_GRID_MINUTES` when the config fields are null. Applies across `assign()`, `assignPlayoffs()`, `assignPractices()`, `estimateAvailableSlots()`, `buildAndSolve()`, and `enumerateAllSlots()`. **Behavior change:** leagues that do not configure explicit values now use buffer = 0 and grid = 30 min (previously both were hardcoded to 15 min).
+
+- **`ScheduleGameCommand.gamesConflict()`** — Accepts `int bufferMinutes` as a parameter; derives the value from `league.config().fieldBufferMinutes()` at call time rather than using a hardcoded constant. The conflict-warning message reports the active buffer value.
+
+- **`LeagueStore`** — v8→v9 migration block: no data transformation required; absent `fieldBufferMinutes` and `gridMinutes` keys deserialize to `null` via `FAIL_ON_UNKNOWN_PROPERTIES = false`. Version stamped and written back.
+
+- **`League.CURRENT_VERSION`** — Advanced from `8` to `9`.
+
+### Tests
+
+- **`LeagueConfigTest`** additions — 9 new tests across `WithFieldBufferMinutes` (5) and `WithGridMinutes` (4) nested classes: set value, accept zero (buffer) and null, thread all other fields through unchanged, immutability.
+
+- **`ConfigCommandTest`** additions — 25 new tests: `--field-buffer-minutes` valid (0, 15), invalid (−1, non-integer); `--grid-minutes` valid (30, 15, 60, 1), invalid (0, −1, 7, 120, non-integer); persistence to `config show`; merging without clearing other options; combined set in one call; `config show` `Field buffer` and `Grid interval` labels; `(default)` when unset; correct default values (0 min and 30 min); explicit values without `(default)` suffix; explicit zero for buffer distinguished from unset.
+
+- **`SchedulerServiceBufferGridTest`** (new file, 23 tests) — 5 nested classes:
+  - **`FieldBuffer`** (7): null = default 0; buffer=0 and buffer=30 counts match slot formula; exact boundary fit (duration + buffer == window); oversized buffer → 0 slots; multi-day consistency.
+  - **`GridMinutes`** (8): null = default 30; grid=30/15/60/1 counts match slot formula; coarser grid → fewer slots; multi-day consistency.
+  - **`BufferAndGridCombined`** (3): combined formula (buffer=30 + grid=60); 2-hour window with buffer=60 → 1 slot; 2-hour window with buffer=0 → 3 slots.
+  - **`AssignFieldNonOverlap`** (2): buffer=0 allows two 60-min games back-to-back on the same field (solver); buffer=60 prevents the second game in the same 2-hour window (solver).
+  - **`AssignGridAlignment`** (3): grid=60 → all start times on the hour; grid=30 → :00/:30 only; grid=15 → :15/:45 permitted (solver).
+
+---
+
 ## [0.10.0] — Pre-Season Practice Scheduling
 
 **PRD:** `features/2026-05-26-practice-scheduling.md`

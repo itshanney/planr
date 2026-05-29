@@ -26,6 +26,8 @@ class TeamScheduleServiceTest {
           List.of(),
           List.of(),
           null,
+          null,
+          null,
           null);
 
   // ---------------------------------------------------------------------------
@@ -354,7 +356,16 @@ class TeamScheduleServiceTest {
     Division div = division("Majors", 1, a, b);
     LeagueConfig noDateConfig =
         new LeagueConfig(
-            LocalTime.of(9, 0), LocalTime.of(18, 0), null, null, List.of(), List.of(), null, null);
+            LocalTime.of(9, 0),
+            LocalTime.of(18, 0),
+            null,
+            null,
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null);
     assertInstanceOf(TeamScheduleResult.Failure.class, generate(league(noDateConfig, div)));
   }
 

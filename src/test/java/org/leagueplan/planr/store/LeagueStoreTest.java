@@ -54,7 +54,7 @@ class LeagueStoreTest {
     League league = store.load();
     assertTrue(league.divisions().isEmpty());
     assertTrue(league.fields().isEmpty());
-    assertEquals(8, league.version());
+    assertEquals(9, league.version());
   }
 
   @Test
@@ -82,7 +82,7 @@ class LeagueStoreTest {
     League loaded = store.load();
     assertTrue(loaded.divisions().isEmpty());
     assertTrue(loaded.fields().isEmpty());
-    assertEquals(8, loaded.version());
+    assertEquals(9, loaded.version());
   }
 
   @Test
@@ -169,7 +169,7 @@ class LeagueStoreTest {
     Files.writeString(LEAGUE_FILE, v2Json);
 
     League loaded = store.load();
-    assertEquals(8, loaded.version());
+    assertEquals(9, loaded.version());
     assertNull(loaded.schedule());
     assertTrue(loaded.divisions().isEmpty());
     assertTrue(loaded.fields().isEmpty());
@@ -192,7 +192,7 @@ class LeagueStoreTest {
     store.load();
 
     League onDisk = new LeagueStore().load();
-    assertEquals(8, onDisk.version());
+    assertEquals(9, onDisk.version());
   }
 
   @Test
@@ -209,7 +209,7 @@ class LeagueStoreTest {
     Files.writeString(LEAGUE_FILE, v1Json);
 
     League loaded = store.load();
-    assertEquals(8, loaded.version());
+    assertEquals(9, loaded.version());
     assertTrue(loaded.fields().isEmpty());
     assertNull(loaded.schedule());
   }
@@ -239,7 +239,7 @@ class LeagueStoreTest {
     Files.writeString(LEAGUE_FILE, v3Json);
 
     League loaded = store.load();
-    assertEquals(8, loaded.version());
+    assertEquals(9, loaded.version());
     assertEquals(1, loaded.fields().size());
     Field field = loaded.fields().get(0);
     assertEquals(fieldId, field.id());
@@ -346,7 +346,7 @@ class LeagueStoreTest {
     Files.writeString(LEAGUE_FILE, v4Json);
 
     League loaded = store.load();
-    assertEquals(8, loaded.version());
+    assertEquals(9, loaded.version());
     assertNotNull(loaded.config());
     assertTrue(
         loaded.config().dowWindows().isEmpty(),
@@ -374,7 +374,7 @@ class LeagueStoreTest {
     store.load();
 
     League onDisk = new LeagueStore().load();
-    assertEquals(8, onDisk.version());
+    assertEquals(9, onDisk.version());
   }
 
   // --- atomic write behaviour ---

@@ -78,11 +78,17 @@ League configuration sets parameters used by schedule generation. Sunrise, sunse
 
 ```
 planr config set [--sunrise <HH:mm>] [--sunset <HH:mm>] [--start <YYYY-MM-DD>] [--end <YYYY-MM-DD>]
+                 [--max-games-per-week <N>] [--rest-days <N>]
+                 [--field-buffer-minutes <N>] [--grid-minutes <N>]
 planr config show
 ```
 
 - `--sunrise` and `--sunset` define the default open window applied to every field on every calendar day
 - `--start` and `--end` define the season date range
+- `--max-games-per-week` sets a hard cap on games any team may be scheduled in a single ISO calendar week (default 2)
+- `--rest-days` sets the minimum calendar days between any two games for the same team (default 1; 0 disables)
+- `--field-buffer-minutes` sets the minimum turnover gap between consecutive games on the same field (default 0; 0 means back-to-back games are allowed; must be ≥ 0)
+- `--grid-minutes` sets the start-time grid interval for slot enumeration; must evenly divide 60 (default 30; valid values: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60)
 - Each option is independent; `config set` merges with existing values rather than replacing them
 
 `config show` also displays any configured day-of-week windows and blocked days (see below).
@@ -100,6 +106,10 @@ Sunrise:        09:00
 Sunset:         18:00
 Season start:   2026-06-01
 Season end:     2026-08-31
+Max games/week: 2 (default)
+Min rest days:  1 (default)
+Field buffer:   0 min (default)
+Grid interval:  30 min (default)
 
 Day-of-week windows:
   Wednesday: 16:00 – 21:00
@@ -393,7 +403,7 @@ Reads the confirmed team schedule and runs the OR-Tools CP-SAT solver to assign 
 
 **Constraints enforced:**
 - **C1** — each game assigned exactly once
-- **C2** — no two games on the same field overlap (including a 15-minute buffer between games)
+- **C2** — no two games on the same field overlap (including the configured buffer between games; default 0, allowing back-to-back games)
 - **C3** — no team plays more than once on the same calendar day
 
 **Objective:** minimise the maximum number of games any team plays in a single ISO calendar week (spreads the season evenly).
@@ -553,7 +563,7 @@ Before the solver runs, the scheduler enumerates every valid start time across t
    3. **Day-of-week window** — if a league-wide day-of-week window is configured for this day (e.g., Wednesdays open at 16:00), use its `openStart`→`openEnd` in place of the global sunrise/sunset.
    4. **Global sunrise/sunset** — fall back to the league-wide `sunrise`→`sunset` window.
 3. Subtract any field-level blocks (`planr field block`) that fall on that date. This may fragment the open window into multiple sub-ranges.
-4. Within each sub-range, advance a cursor in 15-minute increments. Each position where a game of the division's duration fits before the window closes becomes one **slot** `(date, field, startTime)`.
+4. Within each sub-range, advance a cursor in `gridMinutes`-minute increments (default 30). Each position where a game of the division's duration fits before the window closes becomes one **slot** `(date, field, startTime)`.
 
 Slots are enumerated separately for each division because divisions have different game durations (a 90-minute division gets more slots per day than a 120-minute one). The total slot count is printed in the feasibility check line before the solver starts.
 
@@ -569,14 +579,14 @@ For each fixture, at most one of its slot variables may be `true`. This is expre
 
 **C2 — no two games overlap on the same field**
 
-Rather than checking every pair of games on the same field for time overlap (which grows as O(N²)), each variable is registered under every 15-minute tick it would occupy:
+Rather than checking every pair of games on the same field for time overlap (which grows as O(N²)), each variable is registered under every grid-sized tick it would occupy:
 
 ```
-ticks covered = [slotStartMinute, slotStartMinute + gameDuration + 15-minute buffer)
-                in 15-minute steps
+ticks covered = [slotStartMinute, slotStartMinute + gameDuration + fieldBufferMinutes)
+                in gridMinutes steps
 ```
 
-For each `(field, date, tick)` bucket, `addAtMostOne` ensures at most one game is active at that tick. This bounds the number of C2 constraints to `numFields × numDays × ticksPerDay` regardless of how many fixtures exist, and the 15-minute buffer guarantees turnover time between consecutive games on a field.
+For each `(field, date, tick)` bucket, `addAtMostOne` ensures at most one game is active at that tick. This bounds the number of C2 constraints to `numFields × numDays × ticksPerDay` regardless of how many fixtures exist. The configured buffer (`fieldBufferMinutes`, default 0) guarantees turnover time between consecutive games on a field; with the default of 0, back-to-back games on the same field are allowed.
 
 **C3 — no team plays twice on the same calendar day**
 

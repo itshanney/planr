@@ -166,6 +166,21 @@ public class LeagueStore {
               league.practiceSchedules());
       save(league);
     }
+    // v8→v9: adds fieldBufferMinutes and gridMinutes to LeagueConfig. Absent from old JSON;
+    // null is the valid "unset" sentinel for both fields — this block only stamps the version.
+    if (league.version() < 9) {
+      league =
+          new League(
+              9,
+              league.config(),
+              league.divisions(),
+              league.fields(),
+              league.teamSchedule(),
+              league.schedule(),
+              league.playoffs(),
+              league.practiceSchedules());
+      save(league);
+    }
     return league;
   }
 

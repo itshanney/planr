@@ -15,7 +15,7 @@ public record League(
     List<Playoff> playoffs,
     List<PracticeSchedule> practiceSchedules) {
 
-  private static final int CURRENT_VERSION = 8;
+  private static final int CURRENT_VERSION = 9;
 
   public League {
     divisions = (divisions == null) ? List.of() : divisions;

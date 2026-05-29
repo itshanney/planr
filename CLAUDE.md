@@ -38,16 +38,32 @@ gradle test --tests "org.leagueplan.planr.command.DivisionCommandTest.Add.succes
 
 ### Command dispatch chain
 
-Picocli routes from `PlanrApp` to top-level command classes (`ConfigCommand`, `DivisionCommand`, `TeamCommand`, `FieldCommand`, `ScheduleCommand`), each of which declares its CRUD operations as static inner classes. `FieldBlockCommand` and `FieldOverrideCommand` are second-level nested subcommands registered under `FieldCommand`, making the invocations `planr field block <add|edit|delete|list>` and `planr field override <add|edit|delete|list>`. `ScheduleGameCommand` is similarly registered under `ScheduleCommand` for `planr schedule game <edit|override>`.
+Picocli routes from `PlanrApp` to top-level command classes (`ConfigCommand`, `DivisionCommand`, `TeamCommand`, `FieldCommand`, `ScheduleCommand`, `PlayoffCommand`, `PracticeCommand`), each of which declares its CRUD operations as static inner classes. Several second-level nested subcommands are registered under their parents:
+
+- `FieldBlockCommand` and `FieldOverrideCommand` under `FieldCommand` → `planr field block <add|edit|delete|list>` and `planr field override <add|edit|delete|list>`
+- `FieldLockCommand` under `FieldCommand` → `planr field lock <add|delete|list>`
+- `ScheduleGameCommand` under `ScheduleCommand` → `planr schedule game <edit|override>`
+- `ConfigDowCommand` under `ConfigCommand` → `planr config dow <add|delete|list>`
+- `ConfigBlockdayCommand` under `ConfigCommand` → `planr config blockday <add|delete|list>`
 
 Commands access the store by traversing `@ParentCommand` references:
-- Top-level commands: `parent.app.store`
-- `FieldBlockCommand` and `FieldOverrideCommand` inner classes: `parent.fieldCmd.app.store`
+- Top-level commands (`PlayoffCommand`, `PracticeCommand`, etc.): `parent.app.store`
+- `FieldBlockCommand`, `FieldOverrideCommand`, and `FieldLockCommand` inner classes: `parent.fieldCmd.app.store`
 - `ScheduleGameCommand` inner classes: `parent.scheduleCmd.app.store`
+- `ConfigDowCommand` and `ConfigBlockdayCommand` inner classes: `parent.configCmd.app.store`
 
 ### Immutable model + store pattern
 
-All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDateOverride`, `LeagueConfig`, `TeamSchedule`, `TeamGame`, `Schedule`, `ScheduledGame`) are Java records. `ScheduleState` and `ScheduleStatus` are enums, not records — `ScheduleState` is derived from `(league.teamSchedule(), league.schedule())` nullability via `ScheduleState.of(league)`. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
+All model types are Java records:
+
+- **Core**: `League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDateOverride`, `FieldDivisionLock`, `LeagueConfig`, `DayOfWeekWindow`
+- **Regular season**: `TeamSchedule`, `TeamGame`, `Schedule`, `ScheduledGame`
+- **Playoffs**: `Playoff`, `PlayoffGame`
+- **Practices**: `PracticeSchedule`, `PracticeSlot`
+
+Enums (not records): `BracketSide`, `PlayoffState`, `PracticeState`, `ScheduleState`, `ScheduleStatus`. `ScheduleState` is derived from `(league.teamSchedule(), league.schedule())` nullability via `ScheduleState.of(league)`. `PlayoffState` and `PracticeState` are derived similarly from the respective list entries.
+
+The `League` compact constructor normalizes `null` to `List.of()` for `divisions`, `fields`, `playoffs`, and `practiceSchedules`. Mutations return new record instances — nothing is mutated in place. `LeagueStore` is the only layer that reads from or writes to disk. Every mutating operation goes:
 
 1. `store.load()` → deserialize `league.json` into `League` record
 2. Build a new `League` via `withX(...)` helper methods on the model records
@@ -61,25 +77,40 @@ All model types (`League`, `Division`, `Team`, `Field`, `FieldBlock`, `FieldDate
 - `WRITE_DATES_AS_TIMESTAMPS` disabled
 - `FAIL_ON_UNKNOWN_PROPERTIES` disabled (forward-compatibility for future schema versions)
 
-**Schema versioning:** The `League` record has a `version` field. Current version is `4`. `LeagueStore.load()` applies migrations in sequence: v1→adds empty `fields` list; v2→no-op marker; v3→drops field availability windows (replaced by the league-wide sunrise/sunset config and per-field blocks/overrides), printing a stderr warning. The compact constructor on `League` normalizes null `divisions`/`fields` to `List.of()` so old files without those keys deserialize safely.
+**Schema versioning:** The `League` record has a `version` field. Current version is `9`. `LeagueStore.load()` applies migrations in sequence:
+
+| From | To | What changed |
+|------|----|--------------|
+| v1 | v2 | adds empty `fields` list |
+| v2 | v3 | no-op marker |
+| v3 | v4 | drops field availability windows; adds `LeagueConfig`; prints stderr warning |
+| v4 | v5 | no-op — `LeagueConfig` gains `dowWindows`/`blockedDays` (compact constructor normalizes nulls) |
+| v5 | v6 | no-op — `LeagueConfig` gains `maxGamesPerWeek`/`minRestDays`; `Field` gains `divisionLocks` |
+| v6 | v7 | no-op — `League` gains `playoffs` list |
+| v7 | v8 | no-op — `League` gains `practiceSchedules` list |
+| v8 | v9 | no-op — `LeagueConfig` gains `fieldBufferMinutes`/`gridMinutes` |
 
 ### Scheduler package
 
 `src/main/java/org/leagueplan/planr/scheduler/` holds all scheduling logic and its supporting types. None of these are persisted to `league.json`.
 
 - `TeamScheduleService` — Phase 1: circle-method round-robin + fill rounds, produces a `TeamSchedule`.
-- `SchedulerService` — Phase 2: OR-Tools CP-SAT field/time assignment. Public methods: `assign(League)` and `estimateAvailableSlots(League, UUID, int)`.
+- `SchedulerService` — Phase 2: OR-Tools CP-SAT field/time assignment. Public methods: `assign(League)`, `assignPlayoffs(League, List<Playoff>)`, `assignPractices(League, List<PracticeSchedule>)`, `estimateAvailableSlots(League, UUID, int)`, and an overload of `enumerateAllSlots` that accepts a division filter.
+- `PlayoffBracketService` — Generates double-elimination bracket slots for N teams (2 ≤ N ≤ 16). Uses power-of-2 bracket padding, seeded byes in W-R1, and positional references (`"W of G3"`, `"L of G2"`). Internal `GameRef(UUID, String prefix)` record carries the correct reference prefix for L-bracket survivors that bypass L-R1 when the real W-R1 game count is odd.
 - `TeamScheduleResult` — sealed interface: `Success(schedule, fillRoundLogs)` or `Failure(message)`.
 - `ScheduleResult` — sealed interface: `Success(games, optimal, targetMet, divisionSummaries)` or `Failure(message)`.
+- `PlayoffScheduleResult` — sealed interface: `Success(games)` or `Failure(message)`.
+- `PracticeScheduleResult` — sealed interface: `Success(slots)` or `Failure(message)`.
 - `DivisionSummary` — record carrying per-division solve stats: `divisionName`, `gamesRequested`, `gamesAssigned`, `slotsAvailable`. Derived method `targetMet()`.
-- `Fixture` — `(gameId, homeTeamId, awayTeamId, divisionId, gameDurationMinutes)` tuple used internally by the CP-SAT model.
+- `Fixture` — `(gameId, homeTeamId, awayTeamId, divisionId, gameDurationMinutes)` tuple used internally by the CP-SAT model for regular-season games.
+- `PracticeFixture` — `(practiceId, teamId, divisionId, durationMinutes)` tuple used internally by the CP-SAT model for practice scheduling.
 - `Slot` — `(date, fieldId, fieldName, startTime)` tuple used internally by the CP-SAT model.
 
 ### Exit codes and output conventions
 
 Most commands: `stdout` on success, `stderr` on error. Exit `0` = success, `1` = validation error, `2` = I/O error. Field and division names are matched case-insensitively throughout.
 
-**Multi-line output:** `planr schedule generate` and `planr schedule assign` emit multiple stdout lines. Phase 1 prints fill-round logs, a matchup table, and a summary line. Phase 2 streams live `[M:SS]` progress lines during the solve, then a constraint summary table and a final status line. All progress output goes to `stdout`.
+**Multi-line output:** `planr schedule generate`, `planr schedule assign`, `planr playoff assign`, and `planr practice assign` emit multiple stdout lines. Phase 1 (`generate`) prints fill-round logs, a matchup table, and a summary line. Phase 2 (`assign`) streams live `[M:SS]` progress lines during the solve, then a constraint summary table and a final status line. All progress output goes to `stdout`.
 
 ### Test isolation
 

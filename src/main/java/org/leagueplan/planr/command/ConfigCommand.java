@@ -83,6 +83,26 @@ public class ConfigCommand implements Runnable {
                 + ").")
     String restDaysStr;
 
+    @Option(
+        names = "--field-buffer-minutes",
+        paramLabel = "<N>",
+        description =
+            "Minutes of dead time added after each game/practice before the field is"
+                + " re-available (default: "
+                + SchedulerService.DEFAULT_FIELD_BUFFER_MINUTES
+                + ").")
+    String fieldBufferMinutesStr;
+
+    @Option(
+        names = "--grid-minutes",
+        paramLabel = "<N>",
+        description =
+            "Interval in minutes between generated game/practice start times."
+                + " Must be a positive integer that evenly divides 60 (default: "
+                + SchedulerService.DEFAULT_GRID_MINUTES
+                + ").")
+    String gridMinutesStr;
+
     @Override
     public Integer call() {
       if (sunriseStr == null
@@ -90,10 +110,13 @@ public class ConfigCommand implements Runnable {
           && startStr == null
           && endStr == null
           && maxGamesPerWeekStr == null
-          && restDaysStr == null) {
+          && restDaysStr == null
+          && fieldBufferMinutesStr == null
+          && gridMinutesStr == null) {
         System.err.println(
             "Error: At least one of --sunrise, --sunset, --start, --end, "
-                + "--max-games-per-week, or --rest-days must be provided.");
+                + "--max-games-per-week, --rest-days, --field-buffer-minutes, "
+                + "or --grid-minutes must be provided.");
         return 1;
       }
 
@@ -174,6 +197,33 @@ public class ConfigCommand implements Runnable {
         }
       }
 
+      Integer fieldBufferMinutes = null;
+      if (fieldBufferMinutesStr != null) {
+        try {
+          fieldBufferMinutes = Integer.parseInt(fieldBufferMinutesStr);
+          if (fieldBufferMinutes < 0) throw new NumberFormatException();
+        } catch (NumberFormatException e) {
+          System.err.printf(
+              "Error: --field-buffer-minutes must be a non-negative integer (got \"%s\").%n",
+              fieldBufferMinutesStr);
+          return 1;
+        }
+      }
+
+      Integer gridMinutes = null;
+      if (gridMinutesStr != null) {
+        try {
+          gridMinutes = Integer.parseInt(gridMinutesStr);
+          if (gridMinutes <= 0 || 60 % gridMinutes != 0) throw new NumberFormatException();
+        } catch (NumberFormatException e) {
+          System.err.printf(
+              "Error: --grid-minutes must be a positive integer that evenly divides 60"
+                  + " (got \"%s\").%n",
+              gridMinutesStr);
+          return 1;
+        }
+      }
+
       try {
         League league = parent.app.store.load();
         LeagueConfig existing = (league.config() != null) ? league.config() : LeagueConfig.empty();
@@ -187,7 +237,9 @@ public class ConfigCommand implements Runnable {
                 existing.dowWindows(),
                 existing.blockedDays(),
                 (maxGamesPerWeek != null) ? maxGamesPerWeek : existing.maxGamesPerWeek(),
-                (restDays != null) ? restDays : existing.minRestDays());
+                (restDays != null) ? restDays : existing.minRestDays(),
+                (fieldBufferMinutes != null) ? fieldBufferMinutes : existing.fieldBufferMinutes(),
+                (gridMinutes != null) ? gridMinutes : existing.gridMinutes());
 
         parent.app.store.save(league.withConfig(updated));
         System.out.println("League config updated.");
@@ -247,6 +299,23 @@ public class ConfigCommand implements Runnable {
               "Min rest days:    %d (default)%n", SchedulerService.DEFAULT_MIN_REST_DAYS);
         } else {
           System.out.printf("Min rest days:    %d%n", minRestDays);
+        }
+
+        Integer fieldBufferMinutes = (config != null) ? config.fieldBufferMinutes() : null;
+        if (fieldBufferMinutes == null) {
+          System.out.printf(
+              "Field buffer:     %d min (default)%n",
+              SchedulerService.DEFAULT_FIELD_BUFFER_MINUTES);
+        } else {
+          System.out.printf("Field buffer:     %d min%n", fieldBufferMinutes);
+        }
+
+        Integer gridMinutes = (config != null) ? config.gridMinutes() : null;
+        if (gridMinutes == null) {
+          System.out.printf(
+              "Grid interval:    %d min (default)%n", SchedulerService.DEFAULT_GRID_MINUTES);
+        } else {
+          System.out.printf("Grid interval:    %d min%n", gridMinutes);
         }
 
         System.out.println();
