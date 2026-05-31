@@ -40,7 +40,7 @@ class TeamScheduleServiceTest {
 
   private static Division division(String name, int target, Team... teams) {
     return new Division(
-        UUID.randomUUID(), name, 60, target, List.of(teams), null, null, null, null);
+        UUID.randomUUID(), name, 60, target, List.of(teams), null, null, null, null, null);
   }
 
   private static League league(LeagueConfig config, Division... divisions) {

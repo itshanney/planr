@@ -12,7 +12,10 @@ public sealed interface PlayoffScheduleResult
     permits PlayoffScheduleResult.Success, PlayoffScheduleResult.Failure {
 
   record Success(
-      Map<UUID, Slot> assignmentsByGameId, boolean optimal, List<DivisionSummary> divisionSummaries)
+      Map<UUID, Slot> assignmentsByGameId,
+      boolean optimal,
+      List<DivisionSummary> divisionSummaries,
+      List<PlayoffFieldSummary> fieldSummaries)
       implements PlayoffScheduleResult {}
 
   record Failure(String message) implements PlayoffScheduleResult {}
@@ -20,8 +23,9 @@ public sealed interface PlayoffScheduleResult
   static Success success(
       Map<UUID, Slot> assignmentsByGameId,
       boolean optimal,
-      List<DivisionSummary> divisionSummaries) {
-    return new Success(assignmentsByGameId, optimal, divisionSummaries);
+      List<DivisionSummary> divisionSummaries,
+      List<PlayoffFieldSummary> fieldSummaries) {
+    return new Success(assignmentsByGameId, optimal, divisionSummaries, fieldSummaries);
   }
 
   static Failure failure(String message) {

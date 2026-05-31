@@ -2,6 +2,9 @@ package org.leagueplan.planr.command;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.ResolverStyle;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
@@ -81,7 +84,7 @@ public class DivisionCommand implements Runnable {
         }
         Division division =
             new Division(
-                UUID.randomUUID(), name, duration, target, List.of(), null, null, null, null);
+                UUID.randomUUID(), name, duration, target, List.of(), null, null, null, null, null);
         parent.app.store.save(league.withDivisionAdded(division));
         System.out.printf(
             "Division \"%s\" added (%d min/game, target %d games/team).%n", name, duration, target);
@@ -95,6 +98,9 @@ public class DivisionCommand implements Runnable {
 
   @Command(name = "edit", description = "Edit an existing division.")
   static class EditCmd implements Callable<Integer> {
+
+    private static final DateTimeFormatter TIME_FORMAT =
+        DateTimeFormatter.ofPattern("HH:mm").withResolverStyle(ResolverStyle.STRICT);
 
     @ParentCommand DivisionCommand parent;
 
@@ -137,6 +143,17 @@ public class DivisionCommand implements Runnable {
         description = "Practice window end date (inclusive).")
     String newPracticeEndStr;
 
+    @Option(
+        names = "--curfew-time",
+        paramLabel = "<HH:mm>",
+        description = "Latest game/practice start time for this division.")
+    String newCurfewTimeStr;
+
+    @Option(
+        names = "--no-curfew-time",
+        description = "Remove the curfew constraint from this division.")
+    boolean clearCurfewTime;
+
     @Override
     public Integer call() {
       if (newName == null
@@ -145,11 +162,17 @@ public class DivisionCommand implements Runnable {
           && newPracticeCount == null
           && newPracticeDurationMinutes == null
           && newPracticeStartStr == null
-          && newPracticeEndStr == null) {
+          && newPracticeEndStr == null
+          && newCurfewTimeStr == null
+          && !clearCurfewTime) {
         System.err.println(
             "Error: At least one of --name, --duration, --target, "
                 + "--practice-count, --practice-duration-minutes, --practice-start, "
-                + "or --practice-end must be provided.");
+                + "--practice-end, --curfew-time, or --no-curfew-time must be provided.");
+        return 1;
+      }
+      if (newCurfewTimeStr != null && clearCurfewTime) {
+        System.err.println("Error: --curfew-time and --no-curfew-time are mutually exclusive.");
         return 1;
       }
       if (newName != null && newName.isBlank()) {
@@ -197,6 +220,17 @@ public class DivisionCommand implements Runnable {
           System.err.printf(
               "Error: Invalid date \"%s\" for --practice-end. Expected YYYY-MM-DD.%n",
               newPracticeEndStr);
+          return 1;
+        }
+      }
+
+      LocalTime newCurfewTime = null;
+      if (newCurfewTimeStr != null) {
+        try {
+          newCurfewTime = LocalTime.parse(newCurfewTimeStr.trim(), TIME_FORMAT);
+        } catch (DateTimeParseException e) {
+          System.err.printf(
+              "Error: Invalid time \"%s\" for --curfew-time. Expected HH:mm.%n", newCurfewTimeStr);
           return 1;
         }
       }
@@ -254,7 +288,9 @@ public class DivisionCommand implements Runnable {
                 newPracticeCount,
                 newPracticeDurationMinutes,
                 newPracticeStart,
-                newPracticeEnd);
+                newPracticeEnd,
+                newCurfewTime,
+                clearCurfewTime);
         parent.app.store.save(league.withDivisionReplaced(division.id(), updated));
         System.out.printf("Division \"%s\" updated.%n", updated.name());
         return 0;
@@ -272,7 +308,9 @@ public class DivisionCommand implements Runnable {
         Integer newPracticeCount,
         Integer newPracticeDurationMinutes,
         LocalDate newPracticeStart,
-        LocalDate newPracticeEnd) {
+        LocalDate newPracticeEnd,
+        LocalTime newCurfewTime,
+        boolean clearCurfewTime) {
       String resolvedName = (newName != null) ? newName : division.name();
       int resolvedDuration = (newDuration != null) ? newDuration : division.gameDurationMinutes();
       int resolvedTarget = (newTarget != null) ? newTarget : division.targetGamesPerTeam();
@@ -285,6 +323,14 @@ public class DivisionCommand implements Runnable {
       LocalDate resolvedStart =
           (newPracticeStart != null) ? newPracticeStart : division.practiceStart();
       LocalDate resolvedEnd = (newPracticeEnd != null) ? newPracticeEnd : division.practiceEnd();
+      LocalTime resolvedCurfewTime;
+      if (clearCurfewTime) {
+        resolvedCurfewTime = null;
+      } else if (newCurfewTime != null) {
+        resolvedCurfewTime = newCurfewTime;
+      } else {
+        resolvedCurfewTime = division.curfewTime();
+      }
       return new Division(
           division.id(),
           resolvedName,
@@ -294,7 +340,8 @@ public class DivisionCommand implements Runnable {
           resolvedCount,
           resolvedPracMin,
           resolvedStart,
-          resolvedEnd);
+          resolvedEnd,
+          resolvedCurfewTime);
     }
   }
 
@@ -399,6 +446,10 @@ public class DivisionCommand implements Runnable {
                   .mapToInt(d -> pracDateLabel(d.practiceEnd()).length())
                   .max()
                   .orElse(0));
+      int curfewW =
+          Math.max(
+              "CURFEW".length(),
+              divisions.stream().mapToInt(d -> curfewLabel(d).length()).max().orElse(0));
 
       String fmt =
           "%-"
@@ -417,6 +468,8 @@ public class DivisionCommand implements Runnable {
               + pracStartW
               + "s    %-"
               + pracEndW
+              + "s    %-"
+              + curfewW
               + "s%n";
 
       System.out.printf(
@@ -428,7 +481,8 @@ public class DivisionCommand implements Runnable {
           "PRAC_COUNT",
           "PRAC_MIN",
           "PRAC_START",
-          "PRAC_END");
+          "PRAC_END",
+          "CURFEW");
       System.out.printf(
           fmt,
           "-".repeat(nameW),
@@ -438,7 +492,8 @@ public class DivisionCommand implements Runnable {
           "-".repeat(pracCountW),
           "-".repeat(pracMinW),
           "-".repeat(pracStartW),
-          "-".repeat(pracEndW));
+          "-".repeat(pracEndW),
+          "-".repeat(curfewW));
 
       divisions.forEach(
           d ->
@@ -451,7 +506,8 @@ public class DivisionCommand implements Runnable {
                   pracCountLabel(d),
                   pracMinLabel(d),
                   pracDateLabel(d.practiceStart()),
-                  pracDateLabel(d.practiceEnd())));
+                  pracDateLabel(d.practiceEnd()),
+                  curfewLabel(d)));
 
       long unconfigured = divisions.stream().filter(d -> d.targetGamesPerTeam() == 0).count();
       if (unconfigured > 0) {
@@ -476,6 +532,10 @@ public class DivisionCommand implements Runnable {
 
     private String pracDateLabel(java.time.LocalDate date) {
       return date != null ? date.toString() : "--";
+    }
+
+    private String curfewLabel(Division d) {
+      return d.curfewTime() != null ? d.curfewTime().toString() : "--";
     }
   }
 }

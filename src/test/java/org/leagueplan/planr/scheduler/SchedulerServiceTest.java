@@ -78,11 +78,11 @@ class SchedulerServiceTest {
     // sets target to 2*(N-1) so these integration tests produce N*(N-1) total games
     int target = 2 * Math.max(1, teams.length - 1);
     return new Division(
-        UUID.randomUUID(), name, duration, target, List.of(teams), null, null, null, null);
+        UUID.randomUUID(), name, duration, target, List.of(teams), null, null, null, null, null);
   }
 
   private static Field field(String name) {
-    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(), List.of());
+    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(), List.of(), null);
   }
 
   private static League league(LeagueConfig config, List<Division> divisions, List<Field> fields) {
@@ -597,11 +597,11 @@ class SchedulerServiceTest {
     Team a1 = team("AA"), a2 = team("AB");
     Team m1 = team("MA"), m2 = team("MB");
     Division zebra =
-        new Division(UUID.randomUUID(), "Zebra", 60, 2, List.of(z1, z2), null, null, null, null);
+        new Division(UUID.randomUUID(), "Zebra", 60, 2, List.of(z1, z2), null, null, null, null, null);
     Division alpha =
-        new Division(UUID.randomUUID(), "Alpha", 60, 2, List.of(a1, a2), null, null, null, null);
+        new Division(UUID.randomUUID(), "Alpha", 60, 2, List.of(a1, a2), null, null, null, null, null);
     Division majors =
-        new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(m1, m2), null, null, null, null);
+        new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(m1, m2), null, null, null, null, null);
     Field f = field("Riverside Park");
     League l = league(CONFIG, List.of(zebra, alpha, majors), List.of(f));
 
@@ -834,7 +834,7 @@ class SchedulerServiceTest {
     UUID majorsId = majors.id();
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock), null);
 
     League l = league(CONFIG, List.of(majors, tBall), List.of(lockedField));
 
@@ -851,14 +851,14 @@ class SchedulerServiceTest {
 
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock), null);
 
     League l = league(CONFIG, List.of(majors), List.of(lockedField));
     int slotsWithLock = new SchedulerService().estimateAvailableSlots(l, majorsId, 60);
 
     // Baseline: same field with no lock
     Field unlockedField =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(), null);
     League baselineLeague = league(CONFIG, List.of(majors), List.of(unlockedField));
     int slotsWithout = new SchedulerService().estimateAvailableSlots(baselineLeague, majorsId, 60);
 
@@ -880,9 +880,9 @@ class SchedulerServiceTest {
     UUID majorsId = majors.id();
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Majors Field", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Majors Field", null, List.of(), List.of(), List.of(lock), null);
     Field unlockedField =
-        new Field(UUID.randomUUID(), "Open Field", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Open Field", null, List.of(), List.of(), List.of(), null);
 
     League l = league(CONFIG, List.of(majors, aaa), List.of(lockedField, unlockedField));
     ScheduleResult result = new SchedulerService().assign(l);
@@ -915,7 +915,7 @@ class SchedulerServiceTest {
     LocalDate lockEnd = LocalDate.of(2026, 6, 30);
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, lockEnd);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lock), null);
 
     League l = league(CONFIG, List.of(majors, aaa), List.of(lockedField));
 
@@ -925,7 +925,7 @@ class SchedulerServiceTest {
     // Compare: full-season lock gives 0 for AAA
     FieldDivisionLock fullLock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field fullyLockedField =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(fullLock));
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(fullLock), null);
     League fullLeague = league(CONFIG, List.of(majors, aaa), List.of(fullyLockedField));
     int aaaSlotsFullLock = new SchedulerService().estimateAvailableSlots(fullLeague, aaa.id(), 60);
     assertEquals(0, aaaSlotsFullLock);
@@ -949,9 +949,9 @@ class SchedulerServiceTest {
 
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Locked Field", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Locked Field", null, List.of(), List.of(), List.of(lock), null);
     Field unlockedField =
-        new Field(UUID.randomUUID(), "Unlocked Field", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Unlocked Field", null, List.of(), List.of(), List.of(), null);
 
     League l = league(CONFIG, List.of(majors), List.of(lockedField, unlockedField));
     ScheduleResult result = new SchedulerService().assign(l);
@@ -982,9 +982,9 @@ class SchedulerServiceTest {
 
     FieldDivisionLock lock = new FieldDivisionLock(majorsId, SEASON_START, SEASON_END);
     Field lockedField =
-        new Field(UUID.randomUUID(), "Locked", null, List.of(), List.of(), List.of(lock));
+        new Field(UUID.randomUUID(), "Locked", null, List.of(), List.of(), List.of(lock), null);
     Field unlockedField =
-        new Field(UUID.randomUUID(), "Unlocked", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Unlocked", null, List.of(), List.of(), List.of(), null);
 
     League oneFieldLeague = league(CONFIG, List.of(majors), List.of(lockedField));
     League twoFieldLeague = league(CONFIG, List.of(majors), List.of(lockedField, unlockedField));
@@ -1014,9 +1014,9 @@ class SchedulerServiceTest {
     // Lock active only in June; season for this test is July only
     FieldDivisionLock juneLock = new FieldDivisionLock(majorsId, SEASON_START, juneEnd);
     Field pinnedField =
-        new Field(UUID.randomUUID(), "Pinned", null, List.of(), List.of(), List.of(juneLock));
+        new Field(UUID.randomUUID(), "Pinned", null, List.of(), List.of(), List.of(juneLock), null);
     Field unlockedField =
-        new Field(UUID.randomUUID(), "Unlocked", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Unlocked", null, List.of(), List.of(), List.of(), null);
 
     LeagueConfig julyConfig =
         new LeagueConfig(
@@ -1061,9 +1061,9 @@ class SchedulerServiceTest {
     FieldDivisionLock lockA = new FieldDivisionLock(majorsId, SEASON_START, juneEnd);
     FieldDivisionLock lockB = new FieldDivisionLock(majorsId, julyStart, julyEnd);
     Field fieldA =
-        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lockA));
+        new Field(UUID.randomUUID(), "Field A", null, List.of(), List.of(), List.of(lockA), null);
     Field fieldB =
-        new Field(UUID.randomUUID(), "Field B", null, List.of(), List.of(), List.of(lockB));
+        new Field(UUID.randomUUID(), "Field B", null, List.of(), List.of(), List.of(lockB), null);
 
     LeagueConfig twoMonthConfig =
         new LeagueConfig(
@@ -1113,11 +1113,11 @@ class SchedulerServiceTest {
     FieldDivisionLock aaaLock = new FieldDivisionLock(aaaId, SEASON_START, SEASON_END);
     Field majorsField =
         new Field(
-            UUID.randomUUID(), "Majors Field", null, List.of(), List.of(), List.of(majorsLock));
+            UUID.randomUUID(), "Majors Field", null, List.of(), List.of(), List.of(majorsLock), null);
     Field aaaField =
-        new Field(UUID.randomUUID(), "AAA Field", null, List.of(), List.of(), List.of(aaaLock));
+        new Field(UUID.randomUUID(), "AAA Field", null, List.of(), List.of(), List.of(aaaLock), null);
     Field openField =
-        new Field(UUID.randomUUID(), "Open Field", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Open Field", null, List.of(), List.of(), List.of(), null);
 
     League l = league(CONFIG, List.of(majors, aaa), List.of(majorsField, aaaField, openField));
     ScheduleResult result = new SchedulerService().assign(l);

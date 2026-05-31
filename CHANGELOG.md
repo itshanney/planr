@@ -4,6 +4,69 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.12.0] — Division Curfew Times and Playoff Field Priority
+
+**PRD:** `features/2026-05-31-scheduler-division-curfew-field-priority.md`  
+**Spec:** `specs/2026-05-31-scheduler-division-curfew-field-priority.md`
+
+Adds two orthogonal scheduler constraints. A per-division curfew caps the latest allowable game or practice start time, protecting younger players from late-evening events. A per-field playoff priority rank steers the CP-SAT playoff solver toward preferred venues as a soft objective — ranked fields are used first, but the solver falls back to unranked fields rather than failing if ranked capacity is exhausted. Schema advances from v9 to v10.
+
+### Added
+
+- **`planr division edit --curfew-time <HH:mm>`** — Sets the latest time at which any game or practice for this division may **start**. A start exactly at the curfew time is valid; any start after it is excluded from the solver's candidate slots. Validated with `DateTimeFormatter` in `STRICT` mode (rejects `24:00`, seconds-included formats such as `HH:mm:ss`, out-of-range minutes, and non-numeric input). Stored as a nullable `LocalTime` on `Division`; null means no constraint.
+
+- **`planr division edit --no-curfew-time`** — Clears the curfew from a division. Idempotent on divisions that have no curfew. Mutually exclusive with `--curfew-time`.
+
+- **`planr field edit --playoff-priority <n>`** — Assigns a playoff preference rank to a field. Lower numbers are preferred (1 = highest priority). The CP-SAT playoff solver maximizes total priority score as a secondary objective, behind maximizing total assignments and ahead of minimizing week-load imbalance. Validated as a positive integer (≥ 1). Stored as a nullable `Integer` on `Field`; null means unranked. Ignored entirely by regular-season and practice solvers.
+
+- **`planr field edit --no-playoff-priority`** — Removes the playoff priority rank from a field. Idempotent. Mutually exclusive with `--playoff-priority`.
+
+- **`PlayoffFieldSummary` record** — New transient record in the `scheduler` package: `fieldId`, `fieldName`, `playoffPriority` (nullable), `gamesAssigned`. Carried in `PlayoffScheduleResult.Success`; not persisted to `league.json`.
+
+### Changed
+
+- **`planr division list`** — Adds a `CURFEW` column after `PRAC_END`. Displays the curfew as `HH:mm` when set, `--` when not configured.
+
+- **`planr field list`** — Adds a `PLAYOFF_PRI` column after `LOCKS`. Displays the priority rank as an integer when set, `--` when not ranked.
+
+- **`planr playoff assign`** — Prints a `Field Utilization` table after the constraint summary. Columns: `FIELD`, `PLAYOFF_PRI` (rank or `--`), `GAMES`. Only fields that received at least one game appear. Rows are sorted by priority rank ascending (nulls last), then by field name.
+
+- **`Division` record** — Gains `LocalTime curfewTime` as the tenth constructor parameter (after `practiceEnd`). Null means no curfew constraint. All `withTeam*` and `withPracticeConfig` helpers thread the field through unchanged.
+
+- **`Field` record** — Gains `Integer playoffPriority` as the seventh constructor parameter (after `divisionLocks`). Null means unranked. All `with*` helpers thread the field through unchanged.
+
+- **`PlayoffScheduleResult.Success`** — Gains `List<PlayoffFieldSummary> fieldSummaries` as the fourth field. The `success(...)` factory method updated to accept all four parameters. `fieldSummaries` is sorted by priority rank ascending (nulls last), then field name, before being returned.
+
+- **`SchedulerService`** — Three coordinated changes:
+  - *Curfew slot pre-filter:* `enumerateAllSlots`, `enumeratePlayoffSlots`, `enumeratePracticeSlots`, and `estimateAvailableSlots` all call the new `divisionCurfew(League, UUID)` helper and break the start-time cursor when it exceeds the division's curfew. This keeps the CP-SAT model smaller by excluding ineligible slots before model construction.
+  - *Zero-slot hard fail:* `buildAndSolve`, `buildAndSolvePlayoffs`, and `buildAndSolvePractices` each check for divisions with a configured curfew that produced zero slots after filtering. If found, the method returns a `Failure` naming the division and its curfew time before building the CP-SAT model.
+  - *3-tier playoff objective:* `buildAndSolvePlayoffs` computes a `fieldPriorityScore` map for all fields using `buildFieldScoreMap` (`score = maxRank − rank + 1` for ranked fields; 0 for unranked). An `IntVar totalPriorityScore` is added to the model and constrained to the weighted sum of all game assignment variables against their field scores. The existing 2-tier `(totalAssigned × bigM − maxWeekLoad)` objective is extended to 3-tier `(totalAssigned × W1 + totalPriorityScore × W2 − maxWeekLoad)`, where `W1 = max(totalFixtures + 1, maxFieldRank × totalFixtures × W2 + weekCap + 1)` and `W2 = weekCap + 1`. This guarantees lexicographic dominance: one extra assigned game always beats any priority gain; any priority gain always beats week-load balancing. When no fields are ranked (all priorities null), the formula degenerates to the old 2-tier objective unchanged.
+
+- **`LeagueStore`** — v9→v10 migration block: no data transformation required. `Division.curfewTime` and `Field.playoffPriority` absent from existing JSON deserialize as `null` via `FAIL_ON_UNKNOWN_PROPERTIES = false`. Version stamped and written back.
+
+- **`League.CURRENT_VERSION`** — Advanced from `9` to `10`.
+
+### Tests
+
+- **`DivisionCommandCurfewTest`** (new file, 17 tests) across `CurfewTimeValidation`, `NoCurfewTime`, `ListCurfewColumn`, and `NoArgsGuard` nested classes: valid time persists, midnight (`00:00`) accepted, `25:00` rejected, `24:00` rejected (STRICT mode, would parse to midnight under SMART), `19:60` rejected, `HH:mm:ss` format rejected, non-numeric rejected, mutual exclusion error, `--no-curfew-time` removes curfew, idempotent clear, other fields preserved on clear, `CURFEW` header always present, `--` when unset, `HH:mm` when set, mixed table, `--curfew-time`/`--no-curfew-time` each accepted as sole options.
+
+- **`FieldCommandPlayoffPriorityTest`** (new file, 15 tests) across `PlayoffPriorityValidation`, `NoPlayoffPriority`, `ListPlayoffPriorityColumn`, and `NoArgsGuard` nested classes: rank 1 persists, rank 5 persists, rank 0 rejected, negative rank rejected, mutual exclusion error, `--no-playoff-priority` removes rank, idempotent clear, other fields preserved on clear, `PLAYOFF_PRI` header always present, `--` when unset, integer rank when set, mixed table, both new options accepted as sole options, existing no-options guard still enforced.
+
+- **`SchedulerServiceCurfewTest`** (new file, 14 tests) across `EstimateAvailableSlots`, `AssignCurfewHardFail`, and `AssignWithActiveCurfew` nested classes:
+  - *EstimateAvailableSlots (8):* null curfew unchanged; curfew at last valid start time includes that slot (boundary inclusive per AC 6); one minute before excludes it; curfew reduces count vs. unconstrained; exact count for curfew=13:00; curfew before window open → 0 slots; curfew at window open → 1 slot; per-division independence.
+  - *AssignCurfewHardFail (3):* midnight curfew → `ScheduleResult.Failure` naming the division; failure message contains the curfew time; unconstrained division does not trigger the curfew guard.
+  - *AssignWithActiveCurfew (3):* no assigned game starts after curfew (full CP-SAT run); game starting exactly at curfew is assigned (inclusive boundary); another division in the same solve is not limited by a different division's curfew.
+
+- **`SchedulerServiceFieldPriorityTest`** (new file, 15 tests) across `FieldSummaryPresence`, `RankedFieldPreferred`, `FallbackToUnranked`, `EqualRankTreatment`, `NoRankedFields`, and `RegularSeasonUnaffected` nested classes:
+  - *FieldSummaryPresence (5):* non-empty summary when games assigned; field name and game count in summary entry; null priority for unranked field; configured priority value for ranked field; summary sorted by rank ascending, nulls last.
+  - *RankedFieldPreferred (3):* all games go to ranked field when it has capacity (AC 17); unranked field absent from summary; rank 1 preferred over rank 2.
+  - *FallbackToUnranked (2):* games on unranked field when ranked has only 1 slot (AC 18); solver returns Success (not Failure) during fallback.
+  - *EqualRankTreatment (2):* two rank-1 fields used without error (AC 20); unranked field absent when two equal-rank fields have capacity.
+  - *NoRankedFields (2):* solver succeeds when all fields unranked; field summary still populated.
+  - *RegularSeasonUnaffected (1):* `assign()` game count unchanged whether or not fields have playoff priority (AC 21).
+
+---
+
 ## [0.11.0] — Unified Calendar View
 
 **PRD:** `features/2026-05-29-calendar-view.md`  

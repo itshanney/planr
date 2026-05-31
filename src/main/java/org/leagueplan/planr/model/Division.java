@@ -1,6 +1,7 @@
 package org.leagueplan.planr.model;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,7 +16,8 @@ public record Division(
     Integer practiceCount,
     Integer practiceDurationMinutes,
     LocalDate practiceStart,
-    LocalDate practiceEnd) {
+    LocalDate practiceEnd,
+    LocalTime curfewTime) {
 
   public Optional<Team> findTeam(String name) {
     return teams.stream().filter(t -> t.name().equalsIgnoreCase(name)).findFirst();
@@ -42,7 +44,8 @@ public record Division(
         practiceCount,
         practiceDurationMinutes,
         practiceStart,
-        practiceEnd);
+        practiceEnd,
+        curfewTime);
   }
 
   public Division withTeamReplaced(UUID teamId, Team replacement) {
@@ -55,7 +58,8 @@ public record Division(
         practiceCount,
         practiceDurationMinutes,
         practiceStart,
-        practiceEnd);
+        practiceEnd,
+        curfewTime);
   }
 
   public Division withTeamRemoved(UUID teamId) {
@@ -68,7 +72,8 @@ public record Division(
         practiceCount,
         practiceDurationMinutes,
         practiceStart,
-        practiceEnd);
+        practiceEnd,
+        curfewTime);
   }
 
   public Division withPracticeConfig(
@@ -82,6 +87,7 @@ public record Division(
         count,
         durationMinutes,
         start,
-        end);
+        end,
+        curfewTime);
   }
 }

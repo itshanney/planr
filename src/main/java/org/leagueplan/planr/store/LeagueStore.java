@@ -83,7 +83,7 @@ public class LeagueStore {
     if (league.version() < 4) {
       List<Field> migratedFields =
           league.fields().stream()
-              .map(f -> new Field(f.id(), f.name(), f.address(), List.of(), List.of(), List.of()))
+              .map(f -> new Field(f.id(), f.name(), f.address(), List.of(), List.of(), List.of(), null))
               .toList();
       LeagueConfig config = LeagueConfig.empty();
       league =
@@ -172,6 +172,21 @@ public class LeagueStore {
       league =
           new League(
               9,
+              league.config(),
+              league.divisions(),
+              league.fields(),
+              league.teamSchedule(),
+              league.schedule(),
+              league.playoffs(),
+              league.practiceSchedules());
+      save(league);
+    }
+    // v9→v10: adds curfewTime to Division and playoffPriority to Field. Both absent from old
+    // JSON; null is the valid "unset" sentinel for both — this block only stamps the version.
+    if (league.version() < 10) {
+      league =
+          new League(
+              10,
               league.config(),
               league.divisions(),
               league.fields(),

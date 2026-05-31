@@ -63,7 +63,8 @@ public class FieldCommand implements Runnable {
           System.err.printf("Error: Field \"%s\" already exists.%n", name);
           return 1;
         }
-        Field field = new Field(UUID.randomUUID(), name, address, List.of(), List.of(), List.of());
+        Field field =
+            new Field(UUID.randomUUID(), name, address, List.of(), List.of(), List.of(), null);
         parent.app.store.save(league.withFieldAdded(field));
         System.out.printf("Field \"%s\" added.%n", name);
         return 0;
@@ -74,7 +75,7 @@ public class FieldCommand implements Runnable {
     }
   }
 
-  @Command(name = "edit", description = "Edit a field's name or address.")
+  @Command(name = "edit", description = "Edit a field's name, address, or playoff priority.")
   static class EditCmd implements Callable<Integer> {
 
     @ParentCommand FieldCommand parent;
@@ -91,14 +92,39 @@ public class FieldCommand implements Runnable {
         description = "New address; pass empty string to clear.")
     String newAddress;
 
+    @Option(
+        names = "--playoff-priority",
+        paramLabel = "<n>",
+        description =
+            "Playoff field priority rank (1 = highest). Fields with lower ranks are preferred"
+                + " first when assigning playoff games.")
+    Integer newPlayoffPriority;
+
+    @Option(
+        names = "--no-playoff-priority",
+        description = "Remove the playoff priority rank from this field.")
+    boolean clearPlayoffPriority;
+
     @Override
     public Integer call() {
-      if (newName == null && newAddress == null) {
-        System.err.println("Error: At least one of --name or --address must be provided.");
+      if (newName == null && newAddress == null && newPlayoffPriority == null
+          && !clearPlayoffPriority) {
+        System.err.println(
+            "Error: At least one of --name, --address, --playoff-priority, "
+                + "or --no-playoff-priority must be provided.");
+        return 1;
+      }
+      if (newPlayoffPriority != null && clearPlayoffPriority) {
+        System.err.println(
+            "Error: --playoff-priority and --no-playoff-priority are mutually exclusive.");
         return 1;
       }
       if (newName != null && newName.isBlank()) {
         System.err.println("Error: Field name cannot be empty.");
+        return 1;
+      }
+      if (newPlayoffPriority != null && newPlayoffPriority <= 0) {
+        System.err.println("Error: --playoff-priority must be a positive integer.");
         return 1;
       }
       try {
@@ -112,7 +138,8 @@ public class FieldCommand implements Runnable {
           System.err.printf("Error: Field \"%s\" already exists.%n", newName);
           return 1;
         }
-        Field updated = applyEdits(existing.get(), newName, newAddress);
+        Field updated =
+            applyEdits(existing.get(), newName, newAddress, newPlayoffPriority, clearPlayoffPriority);
         parent.app.store.save(league.withFieldReplaced(existing.get().id(), updated));
         System.out.printf("Field \"%s\" updated.%n", updated.name());
         return 0;
@@ -122,18 +149,32 @@ public class FieldCommand implements Runnable {
       }
     }
 
-    private Field applyEdits(Field field, String newName, String newAddress) {
+    private Field applyEdits(
+        Field field,
+        String newName,
+        String newAddress,
+        Integer newPlayoffPriority,
+        boolean clearPlayoffPriority) {
       String resolvedName = (newName != null) ? newName : field.name();
       // Empty string clears the address; null means unchanged.
       String resolvedAddress =
           (newAddress == null) ? field.address() : (newAddress.isBlank() ? null : newAddress);
+      Integer resolvedPriority;
+      if (clearPlayoffPriority) {
+        resolvedPriority = null;
+      } else if (newPlayoffPriority != null) {
+        resolvedPriority = newPlayoffPriority;
+      } else {
+        resolvedPriority = field.playoffPriority();
+      }
       return new Field(
           field.id(),
           resolvedName,
           resolvedAddress,
           field.blocks(),
           field.dateOverrides(),
-          field.divisionLocks());
+          field.divisionLocks(),
+          resolvedPriority);
     }
   }
 
@@ -222,6 +263,13 @@ public class FieldCommand implements Runnable {
                   .mapToInt(f -> String.valueOf(f.divisionLocks().size()).length())
                   .max()
                   .orElse(0));
+      int priorityWidth =
+          Math.max(
+              "PLAYOFF_PRI".length(),
+              fields.stream()
+                  .mapToInt(f -> playoffPriLabel(f).length())
+                  .max()
+                  .orElse(0));
 
       String fmt =
           "%-"
@@ -234,15 +282,18 @@ public class FieldCommand implements Runnable {
               + overridesWidth
               + "s    %-"
               + locksWidth
+              + "s    %-"
+              + priorityWidth
               + "s%n";
-      System.out.printf(fmt, "NAME", "ADDRESS", "BLOCKS", "OVERRIDES", "LOCKS");
+      System.out.printf(fmt, "NAME", "ADDRESS", "BLOCKS", "OVERRIDES", "LOCKS", "PLAYOFF_PRI");
       System.out.printf(
           fmt,
           "-".repeat(nameWidth),
           "-".repeat(addressWidth),
           "-".repeat(blocksWidth),
           "-".repeat(overridesWidth),
-          "-".repeat(locksWidth));
+          "-".repeat(locksWidth),
+          "-".repeat(priorityWidth));
       fields.forEach(
           f ->
               System.out.printf(
@@ -251,7 +302,12 @@ public class FieldCommand implements Runnable {
                   f.address() == null ? "(none)" : f.address(),
                   f.blocks().size(),
                   f.dateOverrides().size(),
-                  f.divisionLocks().size()));
+                  f.divisionLocks().size(),
+                  playoffPriLabel(f)));
+    }
+
+    private String playoffPriLabel(Field f) {
+      return f.playoffPriority() != null ? String.valueOf(f.playoffPriority()) : "--";
     }
   }
 }

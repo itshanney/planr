@@ -553,7 +553,7 @@ class CalendarCommandTest extends CommandTestBase {
       // Inject a new field into the store AFTER assignment so the solver never assigned to it
       LeagueStore store = new LeagueStore();
       League league = store.load();
-      Field ghost = new Field(UUID.randomUUID(), "Ghost Field", "", List.of(), List.of(), List.of());
+      Field ghost = new Field(UUID.randomUUID(), "Ghost Field", "", List.of(), List.of(), List.of(), null);
       store.save(league.withFieldAdded(ghost));
 
       int exit = execute("calendar", "--field", "Ghost Field");

@@ -48,9 +48,9 @@ class SchedulerServiceBufferGridTest {
     Team t1 = new Team(UUID.randomUUID(), "Blue Jays");
     Team t2 = new Team(UUID.randomUUID(), "Cardinals");
     Division div =
-        new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null);
+        new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null, null);
     Field field =
-        new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of());
+        new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of(), null);
     return new League(9, config, List.of(div), List.of(field), null, null, List.of(), List.of());
   }
 
@@ -406,12 +406,12 @@ class SchedulerServiceBufferGridTest {
       Team d2t2 = new Team(UUID.randomUUID(), "Yankees");
       Division div1 =
           new Division(
-              UUID.randomUUID(), "Majors", 60, 1, List.of(d1t1, d1t2), null, null, null, null);
+              UUID.randomUUID(), "Majors", 60, 1, List.of(d1t1, d1t2), null, null, null, null, null);
       Division div2 =
           new Division(
-              UUID.randomUUID(), "AAA", 60, 1, List.of(d2t1, d2t2), null, null, null, null);
+              UUID.randomUUID(), "AAA", 60, 1, List.of(d2t1, d2t2), null, null, null, null, null);
       Field field =
-          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of());
+          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of(), null);
 
       LeagueConfig config =
           new LeagueConfig(T9, T11, DAY1, DAY1, List.of(), List.of(), null, 0, bufferMinutes, 30);
@@ -471,9 +471,9 @@ class SchedulerServiceBufferGridTest {
       Team t1 = new Team(UUID.randomUUID(), "Blue Jays");
       Team t2 = new Team(UUID.randomUUID(), "Cardinals");
       Division div =
-          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null);
+          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null, null);
       Field field =
-          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of());
+          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of(), null);
 
       League league = leagueForWith(config, div, field);
       ScheduleResult result = service.assign(league);
@@ -498,9 +498,9 @@ class SchedulerServiceBufferGridTest {
       Team t1 = new Team(UUID.randomUUID(), "Blue Jays");
       Team t2 = new Team(UUID.randomUUID(), "Cardinals");
       Division div =
-          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null);
+          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null, null);
       Field field =
-          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of());
+          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of(), null);
 
       League league = leagueForWith(config, div, field);
       ScheduleResult result = service.assign(league);
@@ -528,9 +528,9 @@ class SchedulerServiceBufferGridTest {
       Team t1 = new Team(UUID.randomUUID(), "Blue Jays");
       Team t2 = new Team(UUID.randomUUID(), "Cardinals");
       Division div =
-          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null);
+          new Division(UUID.randomUUID(), "Majors", 60, 2, List.of(t1, t2), null, null, null, null, null);
       Field field =
-          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of());
+          new Field(UUID.randomUUID(), "Riverside Park", null, List.of(), List.of(), List.of(), null);
 
       League league = leagueForWith(config, div, field);
       ScheduleResult result = service.assign(league);

@@ -20,7 +20,7 @@ class DivisionTest {
   @BeforeEach
   void setUp() {
     blueJays = new Team(TEAM_A, "Blue Jays");
-    division = new Division(DIV_ID, "Majors", 120, 0, List.of(blueJays), null, null, null, null);
+    division = new Division(DIV_ID, "Majors", 120, 0, List.of(blueJays), null, null, null, null, null);
   }
 
   // --- findTeam ---

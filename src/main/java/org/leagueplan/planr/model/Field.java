@@ -11,7 +11,8 @@ public record Field(
     String address,
     List<FieldBlock> blocks,
     List<FieldDateOverride> dateOverrides,
-    List<FieldDivisionLock> divisionLocks) {
+    List<FieldDivisionLock> divisionLocks,
+    Integer playoffPriority) {
 
   public Field {
     blocks = (blocks == null) ? List.of() : blocks;
@@ -26,19 +27,20 @@ public record Field(
         address,
         Stream.concat(blocks.stream(), Stream.of(block)).toList(),
         dateOverrides,
-        divisionLocks);
+        divisionLocks,
+        playoffPriority);
   }
 
   public Field withBlockReplaced(int zeroBasedIndex, FieldBlock replacement) {
     List<FieldBlock> mutable = new ArrayList<>(blocks);
     mutable.set(zeroBasedIndex, replacement);
-    return new Field(id, name, address, List.copyOf(mutable), dateOverrides, divisionLocks);
+    return new Field(id, name, address, List.copyOf(mutable), dateOverrides, divisionLocks, playoffPriority);
   }
 
   public Field withBlockRemoved(int zeroBasedIndex) {
     List<FieldBlock> mutable = new ArrayList<>(blocks);
     mutable.remove(zeroBasedIndex);
-    return new Field(id, name, address, List.copyOf(mutable), dateOverrides, divisionLocks);
+    return new Field(id, name, address, List.copyOf(mutable), dateOverrides, divisionLocks, playoffPriority);
   }
 
   public Field withOverrideAdded(FieldDateOverride override) {
@@ -48,19 +50,20 @@ public record Field(
         address,
         blocks,
         Stream.concat(dateOverrides.stream(), Stream.of(override)).toList(),
-        divisionLocks);
+        divisionLocks,
+        playoffPriority);
   }
 
   public Field withOverrideReplaced(int zeroBasedIndex, FieldDateOverride replacement) {
     List<FieldDateOverride> mutable = new ArrayList<>(dateOverrides);
     mutable.set(zeroBasedIndex, replacement);
-    return new Field(id, name, address, blocks, List.copyOf(mutable), divisionLocks);
+    return new Field(id, name, address, blocks, List.copyOf(mutable), divisionLocks, playoffPriority);
   }
 
   public Field withOverrideRemoved(int zeroBasedIndex) {
     List<FieldDateOverride> mutable = new ArrayList<>(dateOverrides);
     mutable.remove(zeroBasedIndex);
-    return new Field(id, name, address, blocks, List.copyOf(mutable), divisionLocks);
+    return new Field(id, name, address, blocks, List.copyOf(mutable), divisionLocks, playoffPriority);
   }
 
   public Field withLockAdded(FieldDivisionLock lock) {
@@ -70,12 +73,13 @@ public record Field(
         address,
         blocks,
         dateOverrides,
-        Stream.concat(divisionLocks.stream(), Stream.of(lock)).toList());
+        Stream.concat(divisionLocks.stream(), Stream.of(lock)).toList(),
+        playoffPriority);
   }
 
   public Field withLockRemoved(int zeroBasedIndex) {
     List<FieldDivisionLock> mutable = new ArrayList<>(divisionLocks);
     mutable.remove(zeroBasedIndex);
-    return new Field(id, name, address, blocks, dateOverrides, List.copyOf(mutable));
+    return new Field(id, name, address, blocks, dateOverrides, List.copyOf(mutable), playoffPriority);
   }
 }

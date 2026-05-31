@@ -20,6 +20,7 @@ import org.leagueplan.planr.model.Playoff;
 import org.leagueplan.planr.model.PlayoffGame;
 import org.leagueplan.planr.model.PlayoffState;
 import org.leagueplan.planr.scheduler.PlayoffBracketService;
+import org.leagueplan.planr.scheduler.PlayoffFieldSummary;
 import org.leagueplan.planr.scheduler.PlayoffScheduleResult;
 import org.leagueplan.planr.scheduler.SchedulerService;
 import picocli.CommandLine.Command;
@@ -376,6 +377,7 @@ public class PlayoffCommand implements Runnable {
         parent.app.store.save(updated);
 
         ScheduleCommand.printConstraintSummary(success.divisionSummaries());
+        printFieldUtilization(success.fieldSummaries());
         printActiveFieldLocks(league, refStart, refEnd);
 
         int gAssigned = success.assignmentsByGameId().size();
@@ -390,6 +392,35 @@ public class PlayoffCommand implements Runnable {
         System.err.printf("Error: Failed to access league data: %s%n", e.getMessage());
         return 2;
       }
+    }
+
+    private void printFieldUtilization(List<PlayoffFieldSummary> summaries) {
+      if (summaries.isEmpty()) return;
+      System.out.println("Field Utilization");
+      System.out.println("-----------------");
+      int fieldW =
+          Math.max(
+              "FIELD".length(),
+              summaries.stream().mapToInt(s -> s.fieldName().length()).max().orElse(0));
+      int priW = "PLAYOFF_PRI".length();
+      int gamesW =
+          Math.max(
+              "GAMES".length(),
+              summaries.stream()
+                  .mapToInt(s -> String.valueOf(s.gamesAssigned()).length())
+                  .max()
+                  .orElse(0));
+      String fmt = "%-" + fieldW + "s  %-" + priW + "s  %" + gamesW + "s%n";
+      System.out.printf(fmt, "FIELD", "PLAYOFF_PRI", "GAMES");
+      System.out.printf(fmt, "-".repeat(fieldW), "-".repeat(priW), "-".repeat(gamesW));
+      summaries.forEach(
+          s ->
+              System.out.printf(
+                  fmt,
+                  s.fieldName(),
+                  s.playoffPriority() != null ? String.valueOf(s.playoffPriority()) : "--",
+                  s.gamesAssigned()));
+      System.out.println();
     }
 
     private void printActiveFieldLocks(League league, LocalDate start, LocalDate end) {

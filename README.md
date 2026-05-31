@@ -31,12 +31,18 @@ planr team add "Majors" "Cardinals"
 planr team add "Majors" "Red Sox"
 planr team add "Majors" "Yankees"
 
+# (optional) set a curfew for a division so games can't start after a certain time
+planr division edit "Majors" --curfew-time 19:30
+
 # 3. Add a field
 planr field add "Riverside Park" --address "100 River Rd"
 
 # (optional) restrict availability by day of the week for all fields
 planr config dow set --day wednesday --start 16:00 --end 21:00
 planr config blockday add --day sunday
+
+# (optional) rank fields for playoff scheduling — lower number = higher preference
+planr field edit "Riverside Park" --playoff-priority 1
 
 # 4. (optional) configure and assign pre-season practices
 planr division edit "Majors" --practice-count 2 --practice-duration-minutes 60 \
@@ -182,6 +188,7 @@ Divisions group teams by age or skill level. Each division carries a game durati
 ```
 planr division add <name> --duration <minutes> --target <n>
 planr division edit <name> [--name <new-name>] [--duration <minutes>] [--target <n>]
+                           [--curfew-time <HH:mm>] [--no-curfew-time]
 planr division delete <name>
 planr division list
 ```
@@ -195,9 +202,36 @@ $ planr division add "Majors" --duration 120 --target 10
 Division "Majors" added (120 min/game).
 
 $ planr division list
-DIVISION    DURATION    TARGET    TEAMS
---------    --------    ------    -----
-Majors      120 min     10        0
+DIVISION    DURATION    TARGET    TEAMS    ...    CURFEW
+--------    --------    ------    -----    ---    ------
+Majors      120 min     10        0               --
+```
+
+#### Curfew time
+
+```
+planr division edit <name> --curfew-time <HH:mm>
+planr division edit <name> --no-curfew-time
+```
+
+Sets the latest time at which any game or practice for this division may **start**. A start exactly at the curfew time is valid; any later start is excluded from the solver's candidate slots. Use this to protect younger players from late-evening events.
+
+- `--curfew-time` accepts `HH:mm` in 24-hour format, validated strictly (24:00 and out-of-range values are rejected)
+- `--no-curfew-time` removes the constraint from the division; idempotent on divisions with no curfew
+- The two flags are mutually exclusive
+- When configured, the curfew applies to regular-season games, playoff games, and practices for that division
+- If the curfew eliminates all available slots, `planr schedule assign` (and `playoff assign`, `practice assign`) exits 1 with a message naming the division
+
+The curfew is shown in `planr division list` as `HH:mm` when set, `--` when not configured.
+
+**Example**
+
+```
+$ planr division edit "6U" --curfew-time 19:30
+Division "6U" updated.
+
+$ planr division edit "6U" --no-curfew-time
+Division "6U" updated.
 ```
 
 ---
@@ -235,6 +269,7 @@ Fields are the physical locations where games are played. By default, every fiel
 ```
 planr field add <name> [--address <address>]
 planr field edit <name> [--name <new-name>] [--address <address>]
+                        [--playoff-priority <n>] [--no-playoff-priority]
 planr field delete <name>
 planr field list
 ```
@@ -248,9 +283,38 @@ $ planr field add "Riverside Park" --address "100 River Rd"
 Field "Riverside Park" added.
 
 $ planr field list
-NAME               ADDRESS        BLOCKS    OVERRIDES
----------------    -----------    ------    ---------
-Riverside Park     100 River Rd   0         0
+NAME               ADDRESS        BLOCKS    OVERRIDES    LOCKS    PLAYOFF_PRI
+---------------    -----------    ------    ---------    -----    -----------
+Riverside Park     100 River Rd   0         0            0        --
+```
+
+#### Playoff field priority
+
+```
+planr field edit <name> --playoff-priority <n>
+planr field edit <name> --no-playoff-priority
+```
+
+Assigns a preference rank to a field that the playoff CP-SAT solver uses when choosing where to schedule games. Lower numbers mean higher preference (1 = most preferred). The solver treats this as a soft objective — it fills ranked fields first, but falls back to lower-priority or unranked fields rather than leaving games unassigned.
+
+- `--playoff-priority` must be a positive integer (≥ 1); 0 and negative values are rejected
+- `--no-playoff-priority` removes the rank; idempotent on unranked fields
+- The two flags are mutually exclusive
+- Fields with no rank are used only after all ranked fields are exhausted
+- Playoff priority has **no effect** on regular-season or practice scheduling
+- After `planr playoff assign`, a `Field Utilization` table is printed showing each field used, its rank (`--` if unranked), and the number of games assigned to it
+
+**Example**
+
+```
+$ planr field edit "Riverside Park" --playoff-priority 1
+Field "Riverside Park" updated.
+
+$ planr field edit "Community Park" --playoff-priority 2
+Field "Community Park" updated.
+
+$ planr field edit "Backup Field" --no-playoff-priority
+Field "Backup Field" updated.
 ```
 
 ---
@@ -457,6 +521,21 @@ planr playoff assign
 
 Clears any prior assignments and runs the CP-SAT solver across all divisions that have a playoff bracket. All brackets must share the same `startDate` and `endDate` (validated before the solve starts). Bye slots and the conditional re-match slot are never submitted to the solver. Later-round games use deterministic pseudo-team IDs so rest-day and weekly-cap constraints fire per slot without affecting solver correctness.
 
+If any fields have a `--playoff-priority` rank set (see [Playoff field priority](#playoff-field-priority)), the solver will prefer higher-ranked fields as a secondary objective, falling back to lower-priority or unranked fields as needed.
+
+After the solve, a `Field Utilization` table is printed listing every field that received playoff games, its priority rank, and its game count — ranked fields first, then unranked:
+
+```
+Field Utilization
+-----------------
+FIELD           PLAYOFF_PRI  GAMES
+--------------  -----------  -----
+Riverside Park  1            6
+Eastside Field  1            5
+Community Park  2            2
+Backup Field    --           1
+```
+
 **Preconditions:** at least one playoff bracket exists; all brackets share the same date range; at least one field configured; sunrise/sunset configured.
 
 #### View, clear
@@ -564,8 +643,9 @@ Before the solver runs, the scheduler enumerates every valid start time across t
    4. **Global sunrise/sunset** — fall back to the league-wide `sunrise`→`sunset` window.
 3. Subtract any field-level blocks (`planr field block`) that fall on that date. This may fragment the open window into multiple sub-ranges.
 4. Within each sub-range, advance a cursor in `gridMinutes`-minute increments (default 30). Each position where a game of the division's duration fits before the window closes becomes one **slot** `(date, field, startTime)`.
+5. If the division has a **curfew time** configured (`planr division edit --curfew-time`), any slot whose start time is strictly after the curfew is discarded at this stage — before the CP-SAT model is even built. A start exactly at the curfew time is kept.
 
-Slots are enumerated separately for each division because divisions have different game durations (a 90-minute division gets more slots per day than a 120-minute one). The total slot count is printed in the feasibility check line before the solver starts.
+Slots are enumerated separately for each division because divisions have different game durations (a 90-minute division gets more slots per day than a 120-minute one). The total slot count — after any curfew filtering — is printed in the feasibility check line before the solver starts. If curfew filtering reduces a division's slot count to zero, the assign command exits with an error naming the division and its curfew before running the solver.
 
 ### Step 2 — build the constraint model
 

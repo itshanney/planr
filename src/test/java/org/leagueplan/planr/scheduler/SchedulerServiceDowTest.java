@@ -50,18 +50,18 @@ class SchedulerServiceDowTest {
   // ---------------------------------------------------------------------------
 
   private static Field fieldWithNoEntries(String name) {
-    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(), List.of());
+    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(), List.of(), null);
   }
 
   private static Field fieldWithOverride(String name, FieldDateOverride override) {
-    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(override), List.of());
+    return new Field(UUID.randomUUID(), name, null, List.of(), List.of(override), List.of(), null);
   }
 
   private static Division division(String name) {
     Team t1 = new Team(UUID.randomUUID(), "Blue Jays");
     Team t2 = new Team(UUID.randomUUID(), "Cardinals");
     return new Division(
-        UUID.randomUUID(), name, GAME_DURATION, 2, List.of(t1, t2), null, null, null, null);
+        UUID.randomUUID(), name, GAME_DURATION, 2, List.of(t1, t2), null, null, null, null, null);
   }
 
   /** Build a league with no team schedule (sufficient for slot estimation). */

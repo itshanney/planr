@@ -103,7 +103,8 @@ public class SchedulerService {
   /**
    * Returns an upper-bound estimate of how many games could fit in the season window for the given
    * division. Walks every date in the configured season, subtracts field blocks, and counts slots
-   * using the same 15-minute grid as the solver. Does not invoke the solver.
+   * using the same grid as the solver. Applies the division's curfew if set. Does not invoke the
+   * solver.
    */
   public int estimateAvailableSlots(League league, UUID divisionId, int gameDurationMinutes) {
     LeagueConfig config = league.config();
@@ -120,6 +121,8 @@ public class SchedulerService {
             ? config.fieldBufferMinutes()
             : DEFAULT_FIELD_BUFFER_MINUTES;
     int gridMinutes = (config.gridMinutes() != null) ? config.gridMinutes() : DEFAULT_GRID_MINUTES;
+
+    LocalTime curfew = divisionCurfew(league, divisionId);
 
     int total = 0;
     for (LocalDate date = config.seasonStart();
@@ -139,6 +142,7 @@ public class SchedulerService {
         for (LocalTime[] window : subtractBlocks(openWindow[0], openWindow[1], dateBlocks)) {
           LocalTime slotStart = window[0];
           while (!slotStart.plusMinutes(gameDurationMinutes + bufferMinutes).isAfter(window[1])) {
+            if (curfew != null && slotStart.isAfter(curfew)) break;
             total++;
             slotStart = slotStart.plusMinutes(gridMinutes);
           }
@@ -181,9 +185,11 @@ public class SchedulerService {
           if (isFieldLockedToOtherDivision(field, currentDate, divId)) continue;
           if (isDivisionPinnedElsewhere(league, field, currentDate, divId)) continue;
           int duration = divisionDuration(league, divId);
+          LocalTime curfew = divisionCurfew(league, divId);
           for (LocalTime[] window : available) {
             LocalTime slotStart = window[0];
             while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
+              if (curfew != null && slotStart.isAfter(curfew)) break;
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
               slotStart = slotStart.plusMinutes(gridMinutes);
             }
@@ -293,6 +299,14 @@ public class SchedulerService {
         .orElseThrow();
   }
 
+  private LocalTime divisionCurfew(League league, UUID divId) {
+    return league.divisions().stream()
+        .filter(d -> d.id().equals(divId))
+        .findFirst()
+        .map(Division::curfewTime)
+        .orElse(null);
+  }
+
   // --- Progress output ---
 
   private void emitFeasibilityCheckLine(
@@ -336,6 +350,20 @@ public class SchedulerService {
       Map<UUID, List<Slot>> slotsByDiv,
       Map<UUID, Integer> slotCounts,
       long startMs) {
+
+    // Pre-solve curfew feasibility guard: fail fast when a curfewed division has no slots.
+    for (UUID divId : fixturesByDiv.keySet()) {
+      if (slotsByDiv.getOrDefault(divId, List.of()).isEmpty()) {
+        Division div = findDivisionById(league, divId);
+        if (div != null && div.curfewTime() != null) {
+          return ScheduleResult.failure(
+              String.format(
+                  "Error: Division \"%s\" has no available slots after applying curfew %s. "
+                      + "Expand the season window or relax the curfew.",
+                  div.name(), div.curfewTime()));
+        }
+      }
+    }
 
     LeagueConfig config = league.config();
     int bufferMinutes =
@@ -462,8 +490,6 @@ public class SchedulerService {
 
     // C5: Each team must have at least restDays calendar days between any two games.
     // C3 already enforces the same-day case, so only r >= 1 is needed here.
-    // Each (teamId|date, teamId|(date+r)) pair has at most 2 literals because C3 limits
-    // each team to at most one game per day, keeping constraint count manageable.
     if (restDays > 0) {
       for (Map.Entry<String, List<GameVar>> entry : byTeamDate.entrySet()) {
         if (entry.getValue().isEmpty()) continue;
@@ -585,6 +611,10 @@ public class SchedulerService {
         .orElse("[unknown]");
   }
 
+  private Division findDivisionById(League league, UUID divId) {
+    return league.divisions().stream().filter(d -> d.id().equals(divId)).findFirst().orElse(null);
+  }
+
   // --- Playoff field assignment ---
 
   /**
@@ -669,9 +699,11 @@ public class SchedulerService {
           if (isFieldLockedToOtherDivision(field, currentDate, divId)) continue;
           if (isDivisionPinnedElsewhere(league, field, currentDate, divId)) continue;
           int duration = divisionDuration(league, divId);
+          LocalTime curfew = divisionCurfew(league, divId);
           for (LocalTime[] window : available) {
             LocalTime slotStart = window[0];
             while (!slotStart.plusMinutes(duration).isAfter(window[1])) {
+              if (curfew != null && slotStart.isAfter(curfew)) break;
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
               slotStart = slotStart.plusMinutes(gridMinutes);
             }
@@ -689,6 +721,20 @@ public class SchedulerService {
       Map<UUID, Integer> slotCounts,
       long startMs) {
 
+    // Pre-solve curfew feasibility guard: fail fast when a curfewed division has no slots.
+    for (UUID divId : fixturesByDiv.keySet()) {
+      if (slotsByDiv.getOrDefault(divId, List.of()).isEmpty()) {
+        Division div = findDivisionById(league, divId);
+        if (div != null && div.curfewTime() != null) {
+          return PlayoffScheduleResult.failure(
+              String.format(
+                  "Error: Division \"%s\" has no available slots after applying curfew %s. "
+                      + "Expand the playoff window or relax the curfew.",
+                  div.name(), div.curfewTime()));
+        }
+      }
+    }
+
     LeagueConfig config = league.config();
     int bufferMinutes =
         (config != null && config.fieldBufferMinutes() != null)
@@ -698,6 +744,18 @@ public class SchedulerService {
         (config != null && config.gridMinutes() != null)
             ? config.gridMinutes()
             : DEFAULT_GRID_MINUTES;
+
+    // Compute per-field priority scores for the CP-SAT objective.
+    // Score = (maxRank - rank + 1) for ranked fields; 0 for unranked.
+    // This ensures rank 1 always scores highest; all unranked fields are equivalent and lowest.
+    long maxFieldRank =
+        league.fields().stream()
+            .map(Field::playoffPriority)
+            .filter(p -> p != null)
+            .mapToLong(Integer::longValue)
+            .max()
+            .orElse(0L);
+    Map<UUID, Integer> fieldScore = buildFieldScoreMap(league.fields(), maxFieldRank);
 
     CpModel model = new CpModel();
 
@@ -760,7 +818,7 @@ public class SchedulerService {
       isAssigned.put(fixtureId, assigned);
     }
 
-    // C2: field non-overlap per 15-min tick
+    // C2: field non-overlap per grid tick
     for (List<BoolVar> tickVars : byFieldTick.values()) {
       if (tickVars.size() > 1) {
         Literal[] lits = tickVars.stream().map(v -> (Literal) v).toArray(Literal[]::new);
@@ -824,10 +882,28 @@ public class SchedulerService {
       }
     }
 
-    long bigM = (long) totalFixtures + 1;
+    // Build field priority score IntVar.
+    // 3-tier weighted objective: assignments >> priority score >> week-load balance.
+    // W1 dominates: one extra assignment always beats any priority or weekload gain.
+    // W2 dominates weekLoad: any priority gain beats any weekload change within cap.
+    long maxTotalPriority = maxFieldRank * totalFixtures;
+    IntVar totalPriorityScore =
+        model.newIntVar(0, Math.max(1L, maxTotalPriority), "total_priority");
+    IntVar[] priorityVars =
+        allGameVars.stream().map(gv -> (IntVar) gv.var()).toArray(IntVar[]::new);
+    long[] priorityScores =
+        allGameVars.stream()
+            .mapToLong(gv -> fieldScore.getOrDefault(gv.slot().fieldId(), 0))
+            .toArray();
+    model.addEquality(totalPriorityScore, LinearExpr.weightedSum(priorityVars, priorityScores));
+
+    long W2 = (long) weekCap + 1L;
+    long W1 = Math.max((long) totalFixtures + 1L, maxFieldRank * totalFixtures * W2 + weekCap + 1L);
+
     model.maximize(
         LinearExpr.weightedSum(
-            new IntVar[] {totalAssignedVar, maxWeekLoad}, new long[] {bigM, -1L}));
+            new IntVar[] {totalAssignedVar, totalPriorityScore, maxWeekLoad},
+            new long[] {W1, W2, -1L}));
 
     CpSolver solver = new CpSolver();
     solver.getParameters().setMaxTimeInSeconds(SOLVER_TIME_LIMIT_SECONDS);
@@ -877,8 +953,40 @@ public class SchedulerService {
             .sorted(Comparator.comparing(DivisionSummary::divisionName))
             .toList();
 
+    // Build per-field utilization summary for output.
+    Map<UUID, Integer> gamesPerField = new HashMap<>();
+    for (Slot slot : assignmentsByGameId.values()) {
+      gamesPerField.merge(slot.fieldId(), 1, Integer::sum);
+    }
+    List<PlayoffFieldSummary> fieldSummaries =
+        league.fields().stream()
+            .filter(f -> gamesPerField.containsKey(f.id()))
+            .map(
+                f ->
+                    new PlayoffFieldSummary(
+                        f.id(), f.name(), f.playoffPriority(), gamesPerField.get(f.id())))
+            .sorted(
+                Comparator.comparing(
+                        PlayoffFieldSummary::playoffPriority,
+                        Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(PlayoffFieldSummary::fieldName))
+            .toList();
+
     return PlayoffScheduleResult.success(
-        assignmentsByGameId, status == CpSolverStatus.OPTIMAL, summaries);
+        assignmentsByGameId, status == CpSolverStatus.OPTIMAL, summaries, fieldSummaries);
+  }
+
+  /**
+   * Returns a score for each field based on its playoff priority rank. Rank 1 scores highest;
+   * unranked fields score 0.
+   */
+  private Map<UUID, Integer> buildFieldScoreMap(List<Field> fields, long maxRank) {
+    Map<UUID, Integer> scores = new HashMap<>();
+    for (Field f : fields) {
+      int score = (f.playoffPriority() != null) ? (int) (maxRank - f.playoffPriority() + 1) : 0;
+      scores.put(f.id(), score);
+    }
+    return scores;
   }
 
   // --- Practice field assignment ---
@@ -975,9 +1083,11 @@ public class SchedulerService {
           if (isDivisionPinnedElsewhere(league, field, currentDate, divId)) continue;
 
           int duration = divisionPracticeDuration(league, divId);
+          LocalTime curfew = divisionCurfew(league, divId);
           for (LocalTime[] avWindow : available) {
             LocalTime slotStart = avWindow[0];
             while (!slotStart.plusMinutes(duration).isAfter(avWindow[1])) {
+              if (curfew != null && slotStart.isAfter(curfew)) break;
               slotsByDiv.get(divId).add(new Slot(currentDate, field.id(), field.name(), slotStart));
               slotStart = slotStart.plusMinutes(gridMinutes);
             }
@@ -994,6 +1104,20 @@ public class SchedulerService {
       Map<UUID, List<Slot>> slotsByDiv,
       Map<UUID, Integer> slotCounts,
       long startMs) {
+
+    // Pre-solve curfew feasibility guard: fail fast when a curfewed division has no slots.
+    for (UUID divId : fixturesByDiv.keySet()) {
+      if (slotsByDiv.getOrDefault(divId, List.of()).isEmpty()) {
+        Division div = findDivisionById(league, divId);
+        if (div != null && div.curfewTime() != null) {
+          return PracticeScheduleResult.failure(
+              String.format(
+                  "Error: Division \"%s\" has no available slots after applying curfew %s. "
+                      + "Expand the practice window or relax the curfew.",
+                  div.name(), div.curfewTime()));
+        }
+      }
+    }
 
     LeagueConfig config = league.config();
     int bufferMinutes =
@@ -1062,7 +1186,7 @@ public class SchedulerService {
       isAssigned.put(slotId, assigned);
     }
 
-    // C2: At each 15-min tick, at most one practice may be active on a given field.
+    // C2: At each grid tick, at most one practice may be active on a given field.
     for (List<BoolVar> tickVars : byFieldTick.values()) {
       if (tickVars.size() > 1) {
         Literal[] lits = tickVars.stream().map(v -> (Literal) v).toArray(Literal[]::new);
