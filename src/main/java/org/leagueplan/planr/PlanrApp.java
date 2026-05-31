@@ -29,7 +29,7 @@ import picocli.CommandLine.Spec;
     },
     description = "League Planner — schedule management for little league organizers.",
     mixinStandardHelpOptions = true,
-    version = "planr 0.12.0")
+    version = "planr 0.13.0")
 public class PlanrApp implements Runnable {
 
   @Spec CommandSpec spec;

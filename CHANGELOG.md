@@ -4,6 +4,32 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.13.0] — `planr schedule view` Filter and Stats Parity
+
+**PRD:** `features/2026-05-31-schedule-view-filter-parity.md`  
+**Spec:** `specs/2026-05-31-schedule-view-filter-parity.md`
+
+Closes two gaps in `planr schedule view`. First, the TEAM_SCHEDULE state path was ignoring all filter flags entirely — `--division` and `--team` now scope both the matchup table and the stat blocks, and `--field` is hard-rejected with a clear error (no field assignments exist in this state). Second, the DRAFT/FINALIZED path was rendering only the game table; it now appends per-division HOME/AWAY BALANCE and HEAD-TO-HEAD stat blocks after the table whenever the filter is unset or `--division`-only. The `--team` and `--field` filters suppress the stat blocks (a per-team or per-field stat summary carries no useful signal). No data model, persistence, or scheduler changes.
+
+### Changed
+
+- **`planr schedule view` — TEAM_SCHEDULE filter parity** — `--division` and `--team` now filter the matchup table and both stat blocks (HOME/AWAY BALANCE, HEAD-TO-HEAD). Previously all three filter flags were silently ignored in TEAM_SCHEDULE state; the full unfiltered game list was always passed to both rendering methods.
+
+- **`planr schedule view --field` in TEAM_SCHEDULE state** — `--field` is now rejected with exit 1 before any entity lookup: `"Error: --field cannot be used when no field assignment exists."` The multi-filter-count guard still fires first, so passing two flags together still produces the usual "At most one of" error.
+
+- **`planr schedule view` — stats blocks in DRAFT/FINALIZED** — The view now renders per-division HOME/AWAY BALANCE and HEAD-TO-HEAD blocks immediately after the game table when no filter or a `--division` filter is active. Previously these blocks appeared only in TEAM_SCHEDULE state. With `--team` or `--field`, only the (already-filtered) game table is shown. The analogy is the existing TEAM_SCHEDULE rendering: matchup table first, stats second.
+
+- **`ScheduleCommand`** — Two new `ScheduledGame` overloads: `printScheduledBalanceBlock(List<ScheduledGame>, String)` and `printScheduledHeadToHeadBlock(List<ScheduledGame>, String)`. These mirror the existing `TeamGame` overloads (identical rendering logic, different source type). Java type erasure prevents true method overloading on `List<T>`, so the `ScheduledGame` variants carry distinct names.
+
+### Tests
+
+- **`ScheduleCommandTest`** — 1 updated test, 9 new tests across the existing `View` and `ViewStats` nested classes:
+  - *Updated (`ViewStats`):* `fullViewInDraftStateDoesNotShowStats` → `fullViewInDraftStateShowsStats`; both `assertFalse` assertions inverted to `assertTrue`.
+  - *New (`View`, 5):* `--division` filter scopes TEAM_SCHEDULE matchup table (Majors shown, AAA excluded); `--team` filter passes through in TEAM_SCHEDULE (exit 0, team name present); `--field` rejected in TEAM_SCHEDULE state (exit 1, error message); multi-filter guard fires before `--field` guard in TEAM_SCHEDULE; unknown `--division` exits 1 with entity-validation error (not empty-result error) in TEAM_SCHEDULE.
+  - *New (`ViewStats`, 4):* `--division` filter in DRAFT scopes stats to that division only; `--team` filter in DRAFT suppresses stats entirely; `--field` filter in DRAFT suppresses stats entirely; FINALIZED view without filter shows stats blocks.
+
+---
+
 ## [0.12.0] — Division Curfew Times and Playoff Field Priority
 
 **PRD:** `features/2026-05-31-scheduler-division-curfew-field-priority.md`  

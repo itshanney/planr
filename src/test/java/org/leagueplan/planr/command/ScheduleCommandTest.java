@@ -585,11 +585,15 @@ class ScheduleCommandTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("shows 'no games match' when filter produces empty results")
-    void showsNoMatchMessageForEmptyFilter() {
+    @DisplayName("exits 1 with message on stderr when field exists but has no assigned games")
+    void emptyFilterResultExits1WithStderrMessage() {
       addMinimalLeague();
       generateDraft();
-      assertEquals(1, execute("schedule", "view", "--field", "Nonexistent Field"));
+      // Add a second field after scheduling so no games are assigned to it
+      execute("field", "add", "Eastside Field");
+      int exit = execute("schedule", "view", "--field", "Eastside Field");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("No games match the specified filter."));
     }
 
     @Test
@@ -649,15 +653,57 @@ class ScheduleCommandTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("--team-schedule flag shows matchup table content in FINALIZED state")
-    void showsMatchupTableWithTeamScheduleFlagInFinalizedState() {
+    @DisplayName("exits 1 when --division and --team are both supplied")
+    void rejectsMultipleFilters_divisionAndTeam() {
+      addMinimalLeague();
+      generateDraft();
+      int exit = execute("schedule", "view", "--division", "Majors", "--team", "Blue Jays");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("At most one of --division, --team, --field may be specified."));
+    }
+
+    @Test
+    @DisplayName("exits 1 when --division and --field are both supplied")
+    void rejectsMultipleFilters_divisionAndField() {
+      addMinimalLeague();
+      generateDraft();
+      int exit =
+          execute("schedule", "view", "--division", "Majors", "--field", "Riverside Park");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("At most one of --division, --team, --field may be specified."));
+    }
+
+    @Test
+    @DisplayName("exits 1 when --team and --field are both supplied")
+    void rejectsMultipleFilters_teamAndField() {
+      addMinimalLeague();
+      generateDraft();
+      int exit =
+          execute("schedule", "view", "--team", "Blue Jays", "--field", "Riverside Park");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("At most one of --division, --team, --field may be specified."));
+    }
+
+    @Test
+    @DisplayName("multi-filter rejection fires before entity validation")
+    void multipleFiltersRejectedBeforeEntityValidation() {
+      addMinimalLeague();
+      generateDraft();
+      int exit =
+          execute("schedule", "view", "--division", "NonExistentDiv", "--team", "Blue Jays");
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("At most one of"));
+      assertFalse(stderr().contains("not found"));
+    }
+
+    @Test
+    @DisplayName("--team-schedule is no longer a recognized option")
+    void teamScheduleFlagRemovedFromView() {
       generateAndFinalizeSchedule();
-      execute("schedule", "view", "--team-schedule");
-      String out = stdout();
-      assertTrue(out.contains("HOME"));
-      assertTrue(out.contains("AWAY"));
-      assertTrue(out.contains("Blue Jays"));
-      assertTrue(out.contains("Cardinals"));
+      int exit = execute("schedule", "view", "--team-schedule");
+      assertNotEquals(0, exit);
+      // picocli emits an unrecognized-option error before call() is invoked
+      assertFalse(stdout().contains("HOME"));
     }
 
     @Test
@@ -685,6 +731,85 @@ class ScheduleCommandTest extends CommandTestBase {
     void exitsOnCorruptedData() throws IOException {
       corruptLeagueFile();
       assertEquals(2, execute("schedule", "view"));
+    }
+
+    @Test
+    @DisplayName("--division filter scopes matchup table in TEAM_SCHEDULE state")
+    void divisionFilterScopesTableInTeamScheduleState() {
+      execute("division", "add", "Majors", "--duration", "60", "--target", "2");
+      execute("division", "add", "AAA", "--duration", "60", "--target", "2");
+      execute("team", "add", "Majors", "Blue Jays");
+      execute("team", "add", "Majors", "Cardinals");
+      execute("team", "add", "AAA", "Red Sox");
+      execute("team", "add", "AAA", "Yankees");
+      execute("field", "add", "Riverside Park");
+      execute(
+          "config",
+          "set",
+          "--sunrise", "07:00",
+          "--sunset", "20:00",
+          "--start", "2026-06-01",
+          "--end", "2026-06-30");
+      execute("schedule", "generate");
+
+      int exit = execute("schedule", "view", "--division", "Majors");
+
+      assertEquals(0, exit);
+      String out = stdout();
+      assertTrue(out.contains("TEAM_SCHEDULE"));
+      assertTrue(out.contains("Blue Jays"));
+      assertTrue(out.contains("Cardinals"));
+      assertFalse(out.contains("Red Sox"));
+      assertFalse(out.contains("Yankees"));
+    }
+
+    @Test
+    @DisplayName("--team filter scopes matchup table in TEAM_SCHEDULE state")
+    void teamFilterScopesTableInTeamScheduleState() {
+      addMinimalLeague();
+      generateTeamSchedule();
+
+      int exit = execute("schedule", "view", "--team", "Blue Jays");
+
+      assertEquals(0, exit);
+      assertTrue(stdout().contains("Blue Jays"));
+    }
+
+    @Test
+    @DisplayName("--field filter is rejected in TEAM_SCHEDULE state with exit 1")
+    void fieldFilterRejectedInTeamScheduleState() {
+      addMinimalLeague();
+      generateTeamSchedule();
+
+      int exit = execute("schedule", "view", "--field", "Riverside Park");
+
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("--field cannot be used when no field assignment exists"));
+    }
+
+    @Test
+    @DisplayName("--field filter rejection in TEAM_SCHEDULE fires after multi-filter guard")
+    void fieldFilterRejectionFiresAfterMultiFilterGuardInTeamScheduleState() {
+      addMinimalLeague();
+      generateTeamSchedule();
+
+      int exit = execute("schedule", "view", "--division", "Majors", "--field", "Riverside Park");
+
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("At most one of --division, --team, --field"));
+      assertFalse(stderr().contains("--field cannot be used when no field assignment exists"));
+    }
+
+    @Test
+    @DisplayName("unknown --division filter exits 1 with 'not found' in TEAM_SCHEDULE state")
+    void unknownDivisionFilterExits1InTeamScheduleState() {
+      addMinimalLeague();
+      generateTeamSchedule();
+
+      int exit = execute("schedule", "view", "--division", "AAA");
+
+      assertEquals(1, exit);
+      assertTrue(stderr().contains("not found"));
     }
   }
 
@@ -788,39 +913,14 @@ class ScheduleCommandTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("--team-schedule flag shows both stats sections in DRAFT state")
-    void teamScheduleFlagShowsStatsSectionsInDraftState() {
-      addMinimalLeague();
-      generateDraft();
-      execute("schedule", "view", "--team-schedule");
-      String out = stdout();
-      assertTrue(out.contains("HOME/AWAY BALANCE"));
-      assertTrue(out.contains("HEAD-TO-HEAD"));
-    }
-
-    @Test
-    @DisplayName("full view in DRAFT state without --team-schedule does not show stats")
-    void fullViewInDraftStateDoesNotShowStats() {
+    @DisplayName("full view in DRAFT state shows stats blocks")
+    void fullViewInDraftStateShowsStats() {
       addMinimalLeague();
       generateDraft();
       execute("schedule", "view");
       String out = stdout();
-      assertFalse(out.contains("HOME/AWAY BALANCE"));
-      assertFalse(out.contains("HEAD-TO-HEAD"));
-    }
-
-    @Test
-    @DisplayName("--team-schedule flag shows both stats sections in FINALIZED state (AC-15)")
-    void teamScheduleFlagShowsStatsSectionsInFinalizedState() {
-      generateAndFinalizeSchedule();
-      execute("schedule", "view", "--team-schedule");
-      String out = stdout();
-      assertTrue(
-          out.contains("HOME/AWAY BALANCE"),
-          "balance section must appear with --team-schedule on a finalized schedule");
-      assertTrue(
-          out.contains("HEAD-TO-HEAD"),
-          "head-to-head section must appear with --team-schedule on a finalized schedule");
+      assertTrue(out.contains("HOME/AWAY BALANCE"));
+      assertTrue(out.contains("HEAD-TO-HEAD"));
     }
 
     @Test
@@ -849,6 +949,73 @@ class ScheduleCommandTest extends CommandTestBase {
       String out = stdout();
       assertTrue(out.contains("HOME/AWAY BALANCE — Majors"));
       assertTrue(out.contains("HOME/AWAY BALANCE — AAA"));
+    }
+
+    @Test
+    @DisplayName("--division filter in DRAFT view shows stats only for that division")
+    void divisionFilterScopesStatsToDivisionInDraftView() {
+      execute("division", "add", "Majors", "--duration", "60", "--target", "2");
+      execute("division", "add", "AAA", "--duration", "60", "--target", "2");
+      execute("team", "add", "Majors", "Blue Jays");
+      execute("team", "add", "Majors", "Cardinals");
+      execute("team", "add", "AAA", "Red Sox");
+      execute("team", "add", "AAA", "Yankees");
+      execute("field", "add", "Riverside Park");
+      execute(
+          "config",
+          "set",
+          "--sunrise", "09:00",
+          "--sunset", "18:00",
+          "--start", "2026-06-01",
+          "--end", "2026-06-30");
+      generateDraft();
+
+      int exit = execute("schedule", "view", "--division", "Majors");
+
+      assertEquals(0, exit);
+      String out = stdout();
+      assertTrue(out.contains("HOME/AWAY BALANCE — Majors"));
+      assertFalse(out.contains("HOME/AWAY BALANCE — AAA"));
+    }
+
+    @Test
+    @DisplayName("--team filter in DRAFT view suppresses stats blocks entirely")
+    void teamFilterSkipsStatsInDraftView() {
+      addMinimalLeague();
+      generateDraft();
+
+      int exit = execute("schedule", "view", "--team", "Blue Jays");
+
+      assertEquals(0, exit);
+      String out = stdout();
+      assertFalse(out.contains("HOME/AWAY BALANCE"));
+      assertFalse(out.contains("HEAD-TO-HEAD"));
+    }
+
+    @Test
+    @DisplayName("--field filter in DRAFT view suppresses stats blocks entirely")
+    void fieldFilterSkipsStatsInDraftView() {
+      addMinimalLeague();
+      generateDraft();
+
+      int exit = execute("schedule", "view", "--field", "Riverside Park");
+
+      assertEquals(0, exit);
+      String out = stdout();
+      assertFalse(out.contains("HOME/AWAY BALANCE"));
+      assertFalse(out.contains("HEAD-TO-HEAD"));
+    }
+
+    @Test
+    @DisplayName("full view in FINALIZED state shows stats blocks")
+    void fullViewInFinalizedStateShowsStats() {
+      generateAndFinalizeSchedule();
+
+      execute("schedule", "view");
+
+      String out = stdout();
+      assertTrue(out.contains("HOME/AWAY BALANCE"));
+      assertTrue(out.contains("HEAD-TO-HEAD"));
     }
   }
 

@@ -481,7 +481,7 @@ planr schedule export
 planr schedule finalize
 ```
 
-- **`view`** — in `TEAM_SCHEDULE` state, shows the matchup-only table (`#`, `HOME`, `AWAY`, `DIVISION`). In `DRAFT`/`FINALIZED`, shows the full table with date, time, and field. Filters by division, team, or field apply in `DRAFT`/`FINALIZED` only.
+- **`view`** — in `TEAM_SCHEDULE` state, shows the matchup-only table (`#`, `HOME`, `AWAY`, `DIVISION`) plus HOME/AWAY BALANCE and HEAD-TO-HEAD stat blocks. `--division` and `--team` filter both the table and the stat blocks; `--field` is rejected in this state (no field assignments exist yet). In `DRAFT`/`FINALIZED`, shows the full table with date, time, and field, followed by per-division HOME/AWAY BALANCE and HEAD-TO-HEAD blocks when no filter or a `--division` filter is active. The stat blocks are suppressed when `--team` or `--field` is specified.
 - **`status`** — shows the current state (`TEAM_SCHEDULE`, `DRAFT`, or `FINALIZED`) with per-division game counts, targets, and team counts.
 - **`export`** — writes JSON to stdout. In `TEAM_SCHEDULE` state: `game_number`, `home_team`, `away_team`, `division_name`. In `DRAFT`/`FINALIZED`: adds `date`, `start_time`, `field_name`, and `status`.
 - **`finalize`** — promotes a draft to `FINALIZED` after interactive confirmation. Irreversible.
