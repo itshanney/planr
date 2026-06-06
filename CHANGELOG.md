@@ -4,6 +4,40 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.14.0] — Balanced Multi-Cycle Matchup Generation
+
+**PRD:** `features/2026-06-05-balanced-multi-rr-matchup-generation.md`
+**Spec:** `specs/2026-06-05-balanced-multi-rr-matchup-generation.md`
+
+Replaces the greedy fill-round phase in Phase 1 matchup generation with a structured multi-cycle round-robin approach. The previous algorithm ran a single round-robin and then repeatedly re-paired teams by largest game deficit, which allowed some pairs to meet 3+ times while other pairs never met. The new algorithm computes the number of complete RR cycles that fit within the division's target (`fullCycles = floor(T / (N−1))`), runs those cycles keeping the circle-method rotation continuous across cycle boundaries, and appends a partial cycle for any remainder — guaranteeing that every pair of teams plays each other either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times. No data model, schema, or persistence changes.
+
+### Changed
+
+- **Phase 1 matchup algorithm (`TeamScheduleService`)** — Replaced the greedy fill-round phase with a structured multi-cycle approach. For a division with N teams and a target of T games per team:
+  - `fullCycles = floor(T / (N−1))` complete round-robin passes are run.
+  - If `T mod (N−1) > 0`, a partial cycle adds exactly that many more rounds.
+  - The circle-method rotation state is **never reset** between cycles; it continues from where the previous cycle left off, ensuring a different pairing sequence in each cycle.
+  - The home/away formula now uses a global round index (`globalRound`) that increments continuously across all cycles rather than resetting to 0 at the start of each cycle, preserving correct alternation across cycle boundaries.
+  - **Invariant:** any two teams in the same division play each other either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times. The maximum head-to-head difference between any two pairs is 1.
+  - For even-N divisions with an exact multiple-cycle target (e.g., double RR), every directed matchup appears exactly once and every team has perfect home/away balance (0 imbalance).
+  - For odd-N divisions, the partial cycle respects a ±1 per-team tolerance for byes.
+
+- **Cycle log format** — The `"Fill round K complete: ..."` progress lines emitted by `planr schedule generate` are replaced:
+  - Full cycles: `"Cycle K complete: <team> <count>, ..."` (one line per cycle)
+  - Partial cycle: `"Partial cycle (R of M-1 rounds) complete: <team> <count>, ..."` (M-1 = rounds per full cycle)
+  - When target equals exactly N-1 (the minimum — single RR), no log lines are emitted, consistent with previous behavior.
+
+- **`TeamScheduleResult.Success`** — The `fillRoundLogs` field is renamed to `cycleLogs`. Single caller in `ScheduleCommand` updated.
+
+### Tests
+
+- **`TeamScheduleServiceTest`** — 16 new tests (36 total):
+  - *Updated (2):* `noCycleLogsWhenTargetEqualsNMinus1` and `cycleLogsHaveCorrectCountAndFormat` — renamed, updated field accessor to `cycleLogs()`, new log format and count (3 lines instead of 5 for target=8, N=4).
+  - *New multi-cycle balance (6):* double-RR each pair exactly twice; between-RR h2h imbalance ≤ 1; partial cycle no pair repeats from first cycle; odd-N partial cycle ±1 per-team tolerance; double-RR cycle log count (2 lines); partial-cycle log count (3 lines).
+  - *New correctness (10):* triple-RR each pair exactly three times; triple-RR cycle log count (3 "Cycle K" lines); double-RR each directed matchup exactly once (validates globalRound home/away flip); even-N double-RR home/away imbalance == 0; 2-team many-cycle home/away alternates perfectly; odd-N (N=3) partial cycle log denominator uses M-1=3 not N-1=2; cycle log lines embed correct cumulative game counts; N=5 single-RR each pair appears exactly once; N=5 double-RR each pair exactly twice; game UUIDs distinct in large schedules.
+
+---
+
 ## [0.13.0] — `planr schedule view` Filter and Stats Parity
 
 **PRD:** `features/2026-05-31-schedule-view-filter-parity.md`  

@@ -4,7 +4,7 @@
 
 `planr` is a Java 25 CLI for little-league schedule management. All state lives in a single JSON file. The test suite validates two distinct concerns: (1) **business logic** in model types and scheduler services, and (2) **command behavior** — the full input/output/exit-code contract of every CLI command.
 
-**Total: 920 test invocations across 31 test classes.**
+**Total: 936 test invocations across 31 test classes.**
 
 ---
 
@@ -59,7 +59,7 @@ Tests for stateless service classes that contain algorithm logic.
 | File | Tests | What it covers |
 |---|---|---|
 | `PlayoffBracketServiceTest.java` | 88 | `generateBracket()` for all N in [2,16]: no crash, exactly 1 conditional, bye count = `nextPowerOfTwo(N) - N`, unique game IDs; per-N slot count assertions; `toPlayoffGame()` field preservation; determinism |
-| `TeamScheduleServiceTest.java` | 20 | Circle-method round-robin, fill-round generation, home/away balance, `TeamScheduleResult` sealed type |
+| `TeamScheduleServiceTest.java` | 36 | Multi-cycle circle-method round-robin; head-to-head balance invariant (each pair meets floor(T/(N-1)) or floor+1 times); home/away reversal across cycles (globalRound property); partial-cycle generation; cycle log format and cumulative game-count content; odd-N coverage (N=3, N=5); game UUID uniqueness |
 | `SchedulerServiceTest.java` | 36 | CP-SAT field/time assignment, `estimateAvailableSlots()`, multi-division solves, constraint satisfaction (field non-overlap, rest days, week cap, division locking, pinning) |
 | `SchedulerServiceDowTest.java` | 10 | Day-of-week availability and blocked-day constraints in `estimateAvailableSlots()` |
 | `SchedulerServiceBufferGridTest.java` | 23 | Configurable `fieldBufferMinutes` and `gridMinutes` in `estimateAvailableSlots()` and `assign()` — see detail below |
@@ -191,7 +191,7 @@ Both commands involve an interactive confirmation prompt followed by a CP-SAT so
 | Category | Files | Tests |
 |---|---|---|
 | Model unit tests | 3 | 52 |
-| Scheduler unit tests | 7 | 206 |
+| Scheduler unit tests | 7 | 222 |
 | Store tests | 1 | 19 |
 | Command end-to-end tests | 20 | 643 |
-| **Total** | **31** | **920** |
+| **Total** | **31** | **936** |

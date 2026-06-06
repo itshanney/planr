@@ -266,44 +266,40 @@ class TeamScheduleServiceTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  @DisplayName("no fill round logs when target equals N-1")
-  void noFillRoundLogsWhenTargetEqualsNMinus1() {
+  @DisplayName("no cycle logs when target equals N-1 (minimum single round-robin)")
+  void noCycleLogsWhenTargetEqualsNMinus1() {
     Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
     Division div = division("Majors", 3, a, b, c, d);
     TeamScheduleResult result = generate(league(div));
 
     assertInstanceOf(TeamScheduleResult.Success.class, result);
     assertTrue(
-        ((TeamScheduleResult.Success) result).fillRoundLogs().isEmpty(),
-        "No fill rounds expected when target equals N-1");
+        ((TeamScheduleResult.Success) result).cycleLogs().isEmpty(),
+        "No cycle logs expected when target equals N-1");
   }
 
   @Test
-  @DisplayName("fill round logs contain one entry per fill round in expected format")
-  void fillRoundLogsHaveCorrectCountAndFormat() {
-    // 4 teams, target=8: RR gives 3 games per team; need 5 more → 5 fill rounds (2 games each)
+  @DisplayName("cycle logs: 4 teams target=8 produces 2 full-cycle logs and 1 partial-cycle log")
+  void cycleLogsHaveCorrectCountAndFormat() {
+    // N=4, N-1=3: fullCycles=8/3=2, remainder=8%3=2 → 2 "Cycle K" lines + 1 "Partial cycle" line
     Team a = team("Alpha"), b = team("Beta"), c = team("Delta"), d = team("Gamma");
     Division div = division("Majors", 8, a, b, c, d);
     TeamScheduleResult result = generate(league(div));
 
     assertInstanceOf(TeamScheduleResult.Success.class, result);
-    List<String> logs = ((TeamScheduleResult.Success) result).fillRoundLogs();
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
 
-    assertEquals(5, logs.size(), "Expected 5 fill round log entries for 4 teams with target=8");
-    for (int i = 0; i < logs.size(); i++) {
-      String log = logs.get(i);
-      assertTrue(
-          log.startsWith("Fill round " + (i + 1) + " complete:"),
-          "Log entry "
-              + i
-              + " should start with 'Fill round "
-              + (i + 1)
-              + " complete:'; got: "
-              + log);
-      assertTrue(log.contains("Alpha"), "Log should contain team name 'Alpha': " + log);
-      assertTrue(log.contains("Beta"), "Log should contain team name 'Beta': " + log);
-      assertTrue(log.contains("Delta"), "Log should contain team name 'Delta': " + log);
-      assertTrue(log.contains("Gamma"), "Log should contain team name 'Gamma': " + log);
+    assertEquals(3, logs.size(), "Expected 3 cycle log entries for 4 teams with target=8");
+    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), "First log: " + logs.get(0));
+    assertTrue(logs.get(1).startsWith("Cycle 2 complete:"), "Second log: " + logs.get(1));
+    assertTrue(
+        logs.get(2).startsWith("Partial cycle (2 of 3 rounds) complete:"),
+        "Third log: " + logs.get(2));
+    for (String log : logs) {
+      assertTrue(log.contains("Alpha"), "Log should contain 'Alpha': " + log);
+      assertTrue(log.contains("Beta"), "Log should contain 'Beta': " + log);
+      assertTrue(log.contains("Delta"), "Log should contain 'Delta': " + log);
+      assertTrue(log.contains("Gamma"), "Log should contain 'Gamma': " + log);
     }
   }
 
@@ -415,6 +411,336 @@ class TeamScheduleServiceTest {
       assertEquals(
           i + 1, numbers.get(i), "Game number at sorted position " + i + " should be " + (i + 1));
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multi-cycle head-to-head balance
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("4 teams target=6 (double RR) — each pair meets exactly twice")
+  void doubleRoundRobinEachPairMeetsTwice() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 6, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    assertEquals(12, games.size());
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        UUID x = teams.get(i), y = teams.get(j);
+        long h2h = headToHead(games, x, y);
+        assertEquals(2, h2h, "Pair (" + x + ", " + y + ") should meet exactly twice; got " + h2h);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("4 teams target=8 (between double and triple RR) — head-to-head imbalance at most 1")
+  void betweenDoubleAndTripleRRHeadToHeadImbalanceAtMostOne() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 8, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    // fullCycles=2, remainder=2 → each pair meets 2 or 3 times (floor=2, floor+1=3)
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        long h2h = headToHead(games, teams.get(i), teams.get(j));
+        assertTrue(h2h >= 2 && h2h <= 3, "Head-to-head should be 2 or 3; got " + h2h);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("4 teams target=4 — no pair from the partial cycle repeats from the first full cycle")
+  void partialCyclePairsAreNotRepeatedFromFirstCycle() {
+    // N=4, N-1=3: fullCycles=4/3=1, remainder=4%3=1 → 1 full cycle + 1 partial round
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 4, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    // The first full cycle covers 6 games (3 rounds × 2 games). The partial adds 2 more.
+    // Every pair should appear at most twice total; the 2 partial games must be distinct pairs.
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        long h2h = headToHead(games, teams.get(i), teams.get(j));
+        assertTrue(h2h <= 2, "No pair should meet more than twice; got " + h2h);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("3 teams (odd N) target=5 — each team plays 4 or 5 games (±1 bye tolerance)")
+  void oddNPartialCyclePerTeamCountWithinOneTolerance() {
+    // N=3, N-1=2: fullCycles=5/2=2, remainder=1 → 2 full cycles + 1 partial round
+    // The partial round gives 1 bye: 2 teams get 5 games, 1 team gets 4 games.
+    Team a = team("A"), b = team("B"), c = team("C");
+    Division div = division("Majors", 5, a, b, c);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    for (Team t : List.of(a, b, c)) {
+      long count = gamesPlayedBy(games, t.id());
+      assertTrue(count >= 4 && count <= 5, "Team " + t.name() + " should play 4 or 5 games; got " + count);
+    }
+  }
+
+  @Test
+  @DisplayName("4 teams target=6 (double RR) — cycle logs: exactly 2 lines both prefixed 'Cycle'")
+  void doubleRRCycleLogCount() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 6, a, b, c, d);
+    TeamScheduleResult result = generate(league(div));
+
+    assertInstanceOf(TeamScheduleResult.Success.class, result);
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
+
+    assertEquals(2, logs.size(), "Double RR should produce exactly 2 cycle log lines");
+    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), logs.get(0));
+    assertTrue(logs.get(1).startsWith("Cycle 2 complete:"), logs.get(1));
+  }
+
+  @Test
+  @DisplayName("4 teams target=8 — cycle logs: 2 full-cycle lines then 1 partial-cycle line")
+  void partialRRCycleLogCount() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 8, a, b, c, d);
+    TeamScheduleResult result = generate(league(div));
+
+    assertInstanceOf(TeamScheduleResult.Success.class, result);
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
+
+    assertEquals(3, logs.size(), "Should produce 2 full-cycle logs + 1 partial-cycle log");
+    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), logs.get(0));
+    assertTrue(logs.get(1).startsWith("Cycle 2 complete:"), logs.get(1));
+    assertTrue(logs.get(2).startsWith("Partial cycle (2 of 3 rounds) complete:"), logs.get(2));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Triple round-robin
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("4 teams target=9 (triple RR) — each pair meets exactly three times")
+  void tripleRoundRobinEachPairMeetsThreeTimes() {
+    // N=4, N-1=3: fullCycles=9/3=3, remainder=0 → 3 full cycles, 18 total games
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 9, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    assertEquals(18, games.size());
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        long h2h = headToHead(games, teams.get(i), teams.get(j));
+        assertEquals(3, h2h, "Each pair should meet exactly 3 times in triple RR; got " + h2h);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("4 teams target=9 (triple RR) — cycle logs contain exactly 3 'Cycle K' lines")
+  void tripleRoundRobinCycleLogs() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 9, a, b, c, d);
+    TeamScheduleResult result = generate(league(div));
+
+    assertInstanceOf(TeamScheduleResult.Success.class, result);
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
+
+    assertEquals(3, logs.size());
+    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), logs.get(0));
+    assertTrue(logs.get(1).startsWith("Cycle 2 complete:"), logs.get(1));
+    assertTrue(logs.get(2).startsWith("Cycle 3 complete:"), logs.get(2));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Home/away correctness across cycles
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("4 teams target=6 (double RR) — each directed matchup appears exactly once")
+  void doubleRREachDirectedMatchupAppearsExactlyOnce() {
+    // If globalRound is working correctly, cycle 2 flips home/away for every pair vs cycle 1.
+    // That means for each unordered pair (X, Y): exactly 1 game where X is home, 1 where Y is home.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 6, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        UUID x = teams.get(i), y = teams.get(j);
+        long xHome = games.stream()
+            .filter(g -> g.homeTeamId().equals(x) && g.awayTeamId().equals(y))
+            .count();
+        long yHome = games.stream()
+            .filter(g -> g.homeTeamId().equals(y) && g.awayTeamId().equals(x))
+            .count();
+        assertEquals(1, xHome, "(" + x + " home, " + y + " away) should appear exactly once");
+        assertEquals(1, yHome, "(" + y + " home, " + x + " away) should appear exactly once");
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("4 teams target=6 (double RR, even N) — home/away imbalance is zero for every team")
+  void evenNDoubleRRPerfectHomeAwayBalance() {
+    // With globalRound, cycle 2 exactly reverses cycle 1 home/away → each team has equal home/away.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 6, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    for (Team t : List.of(a, b, c, d)) {
+      long home = games.stream().filter(g -> g.homeTeamId().equals(t.id())).count();
+      long away = games.stream().filter(g -> g.awayTeamId().equals(t.id())).count();
+      assertEquals(0, Math.abs(home - away),
+          "Team " + t.name() + " should have equal home/away in double RR: home=" + home + " away=" + away);
+    }
+  }
+
+  @Test
+  @DisplayName("2 teams target=6 — home/away alternates perfectly across all 6 cycles")
+  void twoTeamsManyCyclesAlternatingHomeAway() {
+    // N=2, rotation is a no-op (only one matchup exists). globalRound must still alternate.
+    Team a = team("A"), b = team("B");
+    Division div = division("Majors", 6, a, b);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    assertEquals(6, games.size());
+    long aHome = games.stream().filter(g -> g.homeTeamId().equals(a.id())).count();
+    long bHome = games.stream().filter(g -> g.homeTeamId().equals(b.id())).count();
+    assertEquals(3, aHome, "A should be home in exactly 3 of 6 games");
+    assertEquals(3, bHome, "B should be home in exactly 3 of 6 games");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Odd-N partial cycle log format
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("3 teams (odd N) target=3 partial cycle log denominator uses M-1=3, not N-1=2")
+  void oddNPartialCycleLogDenominatorIsMRounds() {
+    // N=3 (odd), M=4, M-1=3 rounds per cycle, N-1=2 games per team per cycle.
+    // target=3: fullCycles=3/2=1, remainder=1 → "Partial cycle (1 of 3 rounds) complete"
+    // The denominator must be 3 (M-1 = total rounds in a cycle), not 2 (N-1 = games per team).
+    Team a = team("A"), b = team("B"), c = team("C");
+    Division div = division("Majors", 3, a, b, c);
+    TeamScheduleResult result = generate(league(div));
+
+    assertInstanceOf(TeamScheduleResult.Success.class, result);
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
+
+    assertEquals(2, logs.size(), "Should have 1 full-cycle log + 1 partial-cycle log");
+    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), logs.get(0));
+    assertTrue(
+        logs.get(1).startsWith("Partial cycle (1 of 3 rounds) complete:"),
+        "Denominator should be M-1=3, not N-1=2; got: " + logs.get(1));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Log game-count numbers
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("cycle log lines embed the correct cumulative game count for each team")
+  void cycleLogEmbedsCumulativeGameCounts() {
+    // After cycle 1 (N=4, N-1=3): each team has played 3 games → log shows "{team} 3"
+    // After cycle 2 (double RR): each team has played 6 games → log shows "{team} 6"
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 6, a, b, c, d);
+    TeamScheduleResult result = generate(league(div));
+
+    assertInstanceOf(TeamScheduleResult.Success.class, result);
+    List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
+
+    assertEquals(2, logs.size());
+    // Cycle 1 log must show each team at 3 games (alphabetical order: A 3, B 3, C 3, D 3)
+    String afterCycle1 = logs.get(0);
+    assertTrue(afterCycle1.contains("A 3"), "Cycle 1 log should show A at 3 games: " + afterCycle1);
+    assertTrue(afterCycle1.contains("B 3"), "Cycle 1 log should show B at 3 games: " + afterCycle1);
+    assertTrue(afterCycle1.contains("C 3"), "Cycle 1 log should show C at 3 games: " + afterCycle1);
+    assertTrue(afterCycle1.contains("D 3"), "Cycle 1 log should show D at 3 games: " + afterCycle1);
+    // Cycle 2 log must show each team at 6 games
+    String afterCycle2 = logs.get(1);
+    assertTrue(afterCycle2.contains("A 6"), "Cycle 2 log should show A at 6 games: " + afterCycle2);
+    assertTrue(afterCycle2.contains("B 6"), "Cycle 2 log should show B at 6 games: " + afterCycle2);
+    assertTrue(afterCycle2.contains("C 6"), "Cycle 2 log should show C at 6 games: " + afterCycle2);
+    assertTrue(afterCycle2.contains("D 6"), "Cycle 2 log should show D at 6 games: " + afterCycle2);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Larger odd-N divisions
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("5 teams (odd N) target=4 — each pair appears exactly once (single RR)")
+  void fiveTeamsSingleRREachPairOnce() {
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D"), e = team("E");
+    Division div = division("Majors", 4, a, b, c, d, e);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    // N=5, single RR: N*(N-1)/2 = 10 games; each team plays 4 games.
+    assertEquals(10, games.size());
+    for (Team t : List.of(a, b, c, d, e)) {
+      assertEquals(4, gamesPlayedBy(games, t.id()),
+          "Each team should play exactly 4 games: " + t.name());
+    }
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id(), e.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        long h2h = headToHead(games, teams.get(i), teams.get(j));
+        assertEquals(1, h2h, "Each pair should appear exactly once in single RR; got " + h2h);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("5 teams (odd N) target=8 (double RR) — each pair meets exactly twice")
+  void fiveTeamsDoubleRREachPairMeetsTwice() {
+    // N=5, N-1=4: fullCycles=2, remainder=0 → each pair meets exactly 2 times.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D"), e = team("E");
+    Division div = division("Majors", 8, a, b, c, d, e);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    List<UUID> teams = List.of(a.id(), b.id(), c.id(), d.id(), e.id());
+    for (int i = 0; i < teams.size(); i++) {
+      for (int j = i + 1; j < teams.size(); j++) {
+        long h2h = headToHead(games, teams.get(i), teams.get(j));
+        assertEquals(2, h2h, "Each pair should meet exactly twice in double RR; got " + h2h);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Game ID uniqueness
+  // ---------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("all game UUIDs are distinct even in a large schedule")
+  void allGameUUIDsAreDistinct() {
+    // 4 teams, target=12 (triple RR + 1 partial round) → 4*12/2 + partial = 26 games.
+    // Distinct UUID assertion guards against any ID-generation collision.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D");
+    Division div = division("Majors", 12, a, b, c, d);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    long distinctIds = games.stream().map(TeamGame::id).distinct().count();
+    assertEquals(games.size(), distinctIds, "Every game must have a unique UUID");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers for multi-cycle tests
+  // ---------------------------------------------------------------------------
+
+  private static long headToHead(List<TeamGame> games, UUID x, UUID y) {
+    return games.stream()
+        .filter(
+            g ->
+                (g.homeTeamId().equals(x) && g.awayTeamId().equals(y))
+                    || (g.homeTeamId().equals(y) && g.awayTeamId().equals(x)))
+        .count();
   }
 
   // ---------------------------------------------------------------------------

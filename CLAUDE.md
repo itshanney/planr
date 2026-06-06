@@ -77,7 +77,7 @@ The `League` compact constructor normalizes `null` to `List.of()` for `divisions
 - `WRITE_DATES_AS_TIMESTAMPS` disabled
 - `FAIL_ON_UNKNOWN_PROPERTIES` disabled (forward-compatibility for future schema versions)
 
-**Schema versioning:** The `League` record has a `version` field. Current version is `9`. `LeagueStore.load()` applies migrations in sequence:
+**Schema versioning:** The `League` record has a `version` field. Current version is `10`. `LeagueStore.load()` applies migrations in sequence:
 
 | From | To | What changed |
 |------|----|--------------|
@@ -89,15 +89,16 @@ The `League` compact constructor normalizes `null` to `List.of()` for `divisions
 | v6 | v7 | no-op — `League` gains `playoffs` list |
 | v7 | v8 | no-op — `League` gains `practiceSchedules` list |
 | v8 | v9 | no-op — `LeagueConfig` gains `fieldBufferMinutes`/`gridMinutes` |
+| v9 | v10 | no-op — `Division` gains `curfewTime`; `Field` gains `playoffPriority` (compact constructor normalizes nulls) |
 
 ### Scheduler package
 
 `src/main/java/org/leagueplan/planr/scheduler/` holds all scheduling logic and its supporting types. None of these are persisted to `league.json`.
 
-- `TeamScheduleService` — Phase 1: circle-method round-robin + fill rounds, produces a `TeamSchedule`.
+- `TeamScheduleService` — Phase 1: multi-cycle circle-method round-robin (K full cycles + optional partial cycle), produces a `TeamSchedule`. Guarantees every team pair meets `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times.
 - `SchedulerService` — Phase 2: OR-Tools CP-SAT field/time assignment. Public methods: `assign(League)`, `assignPlayoffs(League, List<Playoff>)`, `assignPractices(League, List<PracticeSchedule>)`, `estimateAvailableSlots(League, UUID, int)`, and an overload of `enumerateAllSlots` that accepts a division filter.
 - `PlayoffBracketService` — Generates double-elimination bracket slots for N teams (2 ≤ N ≤ 16). Uses power-of-2 bracket padding, seeded byes in W-R1, and positional references (`"W of G3"`, `"L of G2"`). Internal `GameRef(UUID, String prefix)` record carries the correct reference prefix for L-bracket survivors that bypass L-R1 when the real W-R1 game count is odd.
-- `TeamScheduleResult` — sealed interface: `Success(schedule, fillRoundLogs)` or `Failure(message)`.
+- `TeamScheduleResult` — sealed interface: `Success(schedule, cycleLogs)` or `Failure(message)`.
 - `ScheduleResult` — sealed interface: `Success(games, optimal, targetMet, divisionSummaries)` or `Failure(message)`.
 - `PlayoffScheduleResult` — sealed interface: `Success(games)` or `Failure(message)`.
 - `PracticeScheduleResult` — sealed interface: `Success(slots)` or `Failure(message)`.
@@ -110,7 +111,7 @@ The `League` compact constructor normalizes `null` to `List.of()` for `divisions
 
 Most commands: `stdout` on success, `stderr` on error. Exit `0` = success, `1` = validation error, `2` = I/O error. Field and division names are matched case-insensitively throughout.
 
-**Multi-line output:** `planr schedule generate`, `planr schedule assign`, `planr playoff assign`, and `planr practice assign` emit multiple stdout lines. Phase 1 (`generate`) prints fill-round logs, a matchup table, and a summary line. Phase 2 (`assign`) streams live `[M:SS]` progress lines during the solve, then a constraint summary table and a final status line. All progress output goes to `stdout`.
+**Multi-line output:** `planr schedule generate`, `planr schedule assign`, `planr playoff assign`, and `planr practice assign` emit multiple stdout lines. Phase 1 (`generate`) prints cycle logs (one line per full cycle, one for any partial cycle; suppressed when target == N−1), a matchup table, and a summary line. Phase 2 (`assign`) streams live `[M:SS]` progress lines during the solve, then a constraint summary table and a final status line. All progress output goes to `stdout`.
 
 ### Test isolation
 

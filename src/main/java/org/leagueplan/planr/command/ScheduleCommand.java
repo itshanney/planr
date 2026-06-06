@@ -108,9 +108,8 @@ public class ScheduleCommand implements Runnable {
 
         TeamScheduleResult.Success success = (TeamScheduleResult.Success) result;
 
-        // Print fill round progress logs before the table
-        success.fillRoundLogs().forEach(System.out::println);
-        if (!success.fillRoundLogs().isEmpty()) System.out.println();
+        success.cycleLogs().forEach(System.out::println);
+        if (!success.cycleLogs().isEmpty()) System.out.println();
 
         long divCount =
             success.schedule().games().stream().map(TeamGame::divisionId).distinct().count();

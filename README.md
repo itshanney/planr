@@ -441,9 +441,9 @@ Schedule generation is split into two phases, with a review step in between.
 planr schedule generate
 ```
 
-Generates a single round-robin for each eligible division (`N*(N-1)/2` matchups, one per team pair), then runs fill rounds until each team reaches the division's `targetGamesPerTeam`. Home/away assignments are balanced by tracking each team's running imbalance.
+Generates matchups for each eligible division using a multi-cycle round-robin. The number of complete round-robin cycles is determined from the division's `targetGamesPerTeam`; any remainder becomes a partial cycle. Every team pair plays either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times — head-to-head imbalance is at most 1.
 
-Prints fill-round progress logs and a full matchup table. Re-running while a team schedule or draft already exists prompts for confirmation; blocked if a finalized schedule exists.
+Prints cycle-progress logs and a full matchup table. Re-running while a team schedule or draft already exists prompts for confirmation; blocked if a finalized schedule exists.
 
 **Preconditions:** season dates configured; at least one division with ≥ 2 teams; per-division target ≥ N−1.
 
@@ -580,50 +580,63 @@ G8 *    Championship  W of G6      W of G7      UNASSIGNED
 
 ## Phase 1 algorithm: how team schedules are built
 
-`planr schedule generate` runs in two stages — a complete round-robin followed by fill rounds — to produce a matchup list where every team plays roughly the same number of home and away games.
+`planr schedule generate` uses a multi-cycle circle-method round-robin to produce a balanced matchup list. For a division with **N** teams and a target of **T** games per team, the generator computes:
 
-### Stage 1 — circle-method round-robin
+- `fullCycles = floor(T / (N−1))` — the number of complete round-robin passes
+- `remainder = T mod (N−1)` — extra rounds needed after the full cycles
 
-For each eligible division (≥ 2 teams), the scheduler generates one complete round-robin using the classic circle method:
+**Invariant:** any two teams play each other either `fullCycles` or `fullCycles + 1` times. The maximum head-to-head difference between any two pairs in the same division is 1.
+
+### Circle-method round generation
+
+All rounds — across full cycles and any partial cycle — are produced by the same stateful circle method:
 
 1. One team is fixed in position; the remaining `N−1` teams form a rotating list.
-2. If N is odd, a null bye-slot is appended so the team count is always even.
-3. There are `N−1` rounds. In each round, `N/2` pairs are read from the circle:
+2. If N is odd, a null bye-slot is appended so the count is always even.
+3. In each round, `N/2` pairs are read from the circle:
    - Pair 0: fixed team vs. last position in the rotating list.
    - Pairs 1…N/2−1: `rotating[i−1]` vs. `rotating[N−2−i]` (symmetric about the centre).
    - Any pairing involving the bye-slot is discarded.
 4. After each round, the rotating list advances by moving its last element to the front.
 
-This produces exactly `N*(N-1)/2` games — one for every distinct team pair — with no team playing twice in the same round.
+One full cycle runs `N−1` rounds and produces exactly `N*(N-1)/2` games — one for every distinct team pair.
 
-**Home/away assignment in Stage 1:** each pair appears in a fixed column index (`specI`) that stays consistent across all rounds as the circle rotates. The left team is home when `(specI + r) % 2 == 0`, otherwise the right team is home. Because `specI` is constant per pair but `r` increments each round, home advantage alternates between the two teams on successive meetings. For a four-team division this produces exactly 1 home and 1 away game per team after two meetings.
+### Full cycles and partial cycle
 
-### Stage 2 — fill rounds
+`fullCycles` complete passes are run through the circle method. After each pass, the rotation continues from where it left off — **the rotation is never reset between cycles**. Continuing the rotation ensures a different pairing sequence in each cycle, which produces better home/away balance across the full schedule.
 
-After the round-robin, each team may have fewer games than the division's `targetGamesPerTeam`. Fill rounds run repeatedly until all teams reach the target or no more pairs can be formed:
+If `remainder > 0`, a partial cycle runs exactly `remainder` more rounds from the current rotation state. Within the partial cycle each team pair appears at most once, so no pair exceeds `fullCycles + 1` total meetings. For odd-N divisions, some teams draw a bye in the partial cycle and receive one fewer game; this ±1 per-team variation is expected and acceptable.
 
-1. For each division, collect all teams still below target.
-2. Sort them: fewest games first; UUID as a stable tiebreaker to keep output deterministic.
-3. Pair greedily: teams at positions 0+1, 2+3, 4+5, … each form one game. The last team is skipped if an odd number remain below target in this round.
-4. **Home/away in fill rounds:** the team with the larger away-over-home imbalance (`awayCount − homeCount`) gets the home slot. Ties go to the team that sorted first (fewer games so far). This continuously re-balances home/away counts so no team accumulates a large advantage.
-5. Counters are updated and the process repeats. It terminates when every team is at target **or** when a full pass produces no new games (which happens with an odd team count — the last unpaired team can never get its final game from another team in the same position).
+### Home/away assignment
+
+Home/away is determined by a **global round index** (`globalRound`) that increments continuously from 0 across all cycles and never resets:
+
+```
+leftIsHome = ((specI + globalRound) % 2 == 0)
+```
+
+`specI` is the column index in the circle table (0 for the fixed-team row, 1 for the first rotating pair, etc.). Because `globalRound` never resets at cycle boundaries, home advantage alternates correctly between cycles. For an even-N division with an exact multiple-cycle target (e.g., double round-robin), this produces **perfect home/away balance** — each team plays exactly half its games at home.
 
 ### Game number assignment
 
-Game numbers are not assigned during generation. After all stage-1 and fill-round games are collected in order, a single pass assigns stable 1-based integers (`1, 2, 3, …`). This means game numbers are globally ordered: all of division A's round-robin games appear before division B's, and fill games appear after all round-robin games.
+Game numbers are assigned after all rounds are collected. A single pass assigns stable 1-based integers in order: all of division A's games appear before division B's; within each division, games are ordered cycle by cycle, round by round.
 
-### Example: 4 teams, target 6
+### Example: 4 teams, target 6 (double round-robin)
 
-| Stage | Round | Games produced | Notes |
+N = 4, N−1 = 3 → `fullCycles = 2`, `remainder = 0`.
+
+| Cycle | Round | Pair 1 (home–away) | Pair 2 (home–away) |
 |---|---|---|---|
-| Round-robin | 1 | A-B, C-D | 3 games per round, 3 rounds |
-| Round-robin | 2 | A-C, D-B | circle rotates once |
-| Round-robin | 3 | A-D, B-C | circle rotates again |
-| Fill | 1 | A-B, C-D | all 4 teams need 3 more; paired by deficit |
-| Fill | 2 | A-C, D-B | still 3 short each |
-| Fill | 3 | A-D, B-C | targets reached — done |
+| 1 | 1 | A–D | C–B |
+| 1 | 2 | C–A | D–B |
+| 1 | 3 | A–B | D–C |
+| 2 | 4 | D–A | B–C |
+| 2 | 5 | A–C | B–D |
+| 2 | 6 | B–A | C–D |
 
-After 6 fill games, every team has exactly 6 games, 3 home and 3 away.
+Every team plays 6 games, 3 home and 3 away. Cycle 2 exactly reverses home/away from cycle 1 for each pair.
+
+**Partial cycle example:** 4 teams, target 8 → `fullCycles = 2`, `remainder = 2`. After the 12 games above, 2 more rounds run from the current rotation state (globalRounds 6–7), adding 2 games per team to reach the target of 8. Every pair meets 2 or 3 times (head-to-head imbalance ≤ 1).
 
 ---
 

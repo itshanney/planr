@@ -6,7 +6,7 @@ import org.leagueplan.planr.model.TeamSchedule;
 public sealed interface TeamScheduleResult
     permits TeamScheduleResult.Success, TeamScheduleResult.Failure {
 
-  record Success(TeamSchedule schedule, List<String> fillRoundLogs) implements TeamScheduleResult {}
+  record Success(TeamSchedule schedule, List<String> cycleLogs) implements TeamScheduleResult {}
 
   record Failure(String message) implements TeamScheduleResult {}
 }
