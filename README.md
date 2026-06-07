@@ -441,7 +441,7 @@ Schedule generation is split into two phases, with a review step in between.
 planr schedule generate
 ```
 
-Generates matchups for each eligible division using a multi-cycle round-robin. The number of complete round-robin cycles is determined from the division's `targetGamesPerTeam`; any remainder becomes a partial cycle. Every team pair plays either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times — head-to-head imbalance is at most 1.
+Generates matchups for each eligible division using a multi-cycle round-robin. The number of complete round-robin cycles is determined from the division's `targetGamesPerTeam`; any remainder becomes a partial cycle. Every team pair plays either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times — head-to-head imbalance is at most 1. No team finishes below T; for odd-N divisions with an odd target, exactly one team finishes at T+1 (the minimum achievable deviation when N×T is odd).
 
 Prints cycle-progress logs and a full matchup table. Re-running while a team schedule or draft already exists prompts for confirmation; blocked if a finalized schedule exists.
 
@@ -605,7 +605,10 @@ One full cycle runs `N−1` rounds and produces exactly `N*(N-1)/2` games — on
 
 `fullCycles` complete passes are run through the circle method. After each pass, the rotation continues from where it left off — **the rotation is never reset between cycles**. Continuing the rotation ensures a different pairing sequence in each cycle, which produces better home/away balance across the full schedule.
 
-If `remainder > 0`, a partial cycle runs exactly `remainder` more rounds from the current rotation state. Within the partial cycle each team pair appears at most once, so no pair exceeds `fullCycles + 1` total meetings. For odd-N divisions, some teams draw a bye in the partial cycle and receive one fewer game; this ±1 per-team variation is expected and acceptable.
+If `remainder > 0`, a partial cycle runs exactly `remainder` more rounds from the current rotation state. Within the partial cycle each team pair appears at most once, so no pair exceeds `fullCycles + 1` total meetings. For odd-N divisions, the bye slot is not evenly distributed across `remainder` rounds, leaving some teams one game short. Two recovery phases follow:
+
+- **Make-up pairing (even target):** When N is odd and T is even, the number of short teams equals `remainder`, which is always even (because T even and N-1 even forces remainder even). Short teams are paired with each other in sequential order; each make-up game brings both from T-1 to T without touching any at-T team. All teams reach exactly T.
+- **Top-up game (odd target):** When both N and T are odd, N×T is odd — it is mathematically impossible for all teams to reach exactly T. After make-up pairing, exactly 1 team remains at T-1. One extra game is added for that team against the opponent with the fewest head-to-head meetings (tie-broken by division team list order). That team reaches T; its opponent unavoidably reaches T+1. This is the minimum achievable deviation.
 
 ### Home/away assignment
 

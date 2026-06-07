@@ -73,6 +73,59 @@ public class TeamScheduleService {
           rotating.add(0, rotating.remove(rotating.size() - 1));
           globalRound++;
         }
+        // E-2: Odd-N partial cycles leave `remainder` teams one game short. When T is even,
+        // remainder is always even, so short teams pair exhaustively with each other —
+        // bringing both from T-1 to T without touching any at-T team.
+        List<Team> shortTeams =
+            div.teams().stream().filter(t -> gameCount.get(t.id()) < target).toList();
+        for (int i = 0; i + 1 < shortTeams.size(); i += 2) {
+          Team left = shortTeams.get(i);
+          Team right = shortTeams.get(i + 1);
+          boolean leftIsHome = (globalRound % 2 == 0);
+          addRound(
+              List.of(new RawGame(leftIsHome ? left : right, leftIsHome ? right : left, div)),
+              ordered,
+              gameCount);
+          globalRound++;
+        }
+        // E-3: For odd N + odd T, exactly 1 team remains at T-1 after E-2 pairing (remainder is
+        // odd). N×T is odd → it is mathematically impossible for all teams to reach exactly T.
+        // Add 1 top-up game for the short team against the opponent with fewest H2H meetings
+        // (tie-broken by div.teams() natural order). That opponent reaches T+1; unavoidable.
+        List<Team> stillShort =
+            div.teams().stream().filter(t -> gameCount.get(t.id()) < target).toList();
+        if (stillShort.size() == 1) {
+          Team shortTeam = stillShort.get(0);
+          UUID shortId = shortTeam.id();
+          UUID divId = div.id();
+          Team topUpOpponent =
+              div.teams().stream()
+                  .filter(t -> !t.id().equals(shortId))
+                  .min(
+                      Comparator.comparingLong(
+                          (Team t) ->
+                              ordered.stream()
+                                  .filter(
+                                      g ->
+                                          g.division().id().equals(divId)
+                                              && ((g.home().id().equals(shortId)
+                                                      && g.away().id().equals(t.id()))
+                                                  || (g.home().id().equals(t.id())
+                                                      && g.away().id().equals(shortId))))
+                                  .count()))
+                  .orElseThrow();
+          boolean leftIsHome = (globalRound % 2 == 0);
+          addRound(
+              List.of(
+                  new RawGame(
+                      leftIsHome ? shortTeam : topUpOpponent,
+                      leftIsHome ? topUpOpponent : shortTeam,
+                      div)),
+              ordered,
+              gameCount);
+          globalRound++;
+        }
+        // Log is emitted after make-up games so counts reflect the final per-team totals.
         cycleLogs.add(
             formatLog(
                 "Partial cycle (" + remainder + " of " + (m - 1) + " rounds) complete",
@@ -166,12 +219,13 @@ public class TeamScheduleService {
       int n = div.teams().size();
       if (n < 2) continue;
       int minimumTarget = n - 1;
-      if (div.targetGamesPerTeam() < minimumTarget) {
+      int target = div.targetGamesPerTeam();
+      if (target < minimumTarget) {
         errors.add(
             String.format(
                 "Error: Division \"%s\" target of %d games per team is less than the minimum of %d"
                     + " required for a single round-robin with %d teams. Minimum target is %d.",
-                div.name(), div.targetGamesPerTeam(), minimumTarget, n, minimumTarget));
+                div.name(), target, minimumTarget, n, minimumTarget));
       }
     }
 

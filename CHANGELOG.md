@@ -20,7 +20,9 @@ Replaces the greedy fill-round phase in Phase 1 matchup generation with a struct
   - The home/away formula now uses a global round index (`globalRound`) that increments continuously across all cycles rather than resetting to 0 at the start of each cycle, preserving correct alternation across cycle boundaries.
   - **Invariant:** any two teams in the same division play each other either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times. The maximum head-to-head difference between any two pairs is 1.
   - For even-N divisions with an exact multiple-cycle target (e.g., double RR), every directed matchup appears exactly once and every team has perfect home/away balance (0 imbalance).
-  - For odd-N divisions, the partial cycle respects a ±1 per-team tolerance for byes.
+  - For odd-N divisions, two recovery phases follow the partial cycle to bring short teams up to the target:
+    - **Make-up pairing (E-2, even T):** The bye slot is not evenly distributed across `remainder` rounds, leaving `remainder` teams one game short. When T is even, `remainder` is always even, so short teams pair exhaustively with each other — bringing both from T-1 to T without touching any at-T team. All teams reach exactly T.
+    - **Top-up game (E-3, odd T):** When both N and T are odd, N×T is odd — it is mathematically impossible for all teams to reach exactly T. After make-up pairing, exactly 1 team remains at T-1. One extra game is added for that team against the opponent with the fewest head-to-head meetings (tie-broken by division team list order); the short team reaches T while its opponent unavoidably reaches T+1. This is the minimum achievable deviation.
 
 - **Cycle log format** — The `"Fill round K complete: ..."` progress lines emitted by `planr schedule generate` are replaced:
   - Full cycles: `"Cycle K complete: <team> <count>, ..."` (one line per cycle)
@@ -31,10 +33,10 @@ Replaces the greedy fill-round phase in Phase 1 matchup generation with a struct
 
 ### Tests
 
-- **`TeamScheduleServiceTest`** — 16 new tests (36 total):
+- **`TeamScheduleServiceTest`** — 19 new tests (39 total):
   - *Updated (2):* `noCycleLogsWhenTargetEqualsNMinus1` and `cycleLogsHaveCorrectCountAndFormat` — renamed, updated field accessor to `cycleLogs()`, new log format and count (3 lines instead of 5 for target=8, N=4).
-  - *New multi-cycle balance (6):* double-RR each pair exactly twice; between-RR h2h imbalance ≤ 1; partial cycle no pair repeats from first cycle; odd-N partial cycle ±1 per-team tolerance; double-RR cycle log count (2 lines); partial-cycle log count (3 lines).
-  - *New correctness (10):* triple-RR each pair exactly three times; triple-RR cycle log count (3 "Cycle K" lines); double-RR each directed matchup exactly once (validates globalRound home/away flip); even-N double-RR home/away imbalance == 0; 2-team many-cycle home/away alternates perfectly; odd-N (N=3) partial cycle log denominator uses M-1=3 not N-1=2; cycle log lines embed correct cumulative game counts; N=5 single-RR each pair appears exactly once; N=5 double-RR each pair exactly twice; game UUIDs distinct in large schedules.
+  - *New multi-cycle balance (7):* double-RR each pair exactly twice; between-RR h2h imbalance ≤ 1; partial cycle no pair repeats from first cycle; odd-N (N=3) odd target T=5 succeeds via E-3 (A=5, B=6, C=5); double-RR cycle log count (2 lines); partial-cycle log count (3 lines); N=5 even non-multiple target all teams reach T via E-2 make-up pairing.
+  - *New correctness (12):* triple-RR each pair exactly three times; triple-RR cycle log count (3 "Cycle K" lines); double-RR each directed matchup exactly once (validates globalRound home/away flip); even-N double-RR home/away imbalance == 0; 2-team many-cycle home/away alternates perfectly; odd-N (N=3) odd target T=3 succeeds (A=3, B=4, C=3); partial-cycle log reflects post-top-up counts (B at 4, not 3); cycle log lines embed correct cumulative game counts; N=5 single-RR each pair appears exactly once; N=5 double-RR each pair exactly twice; N=5 odd target T=7 exactly 1 team at T+1 via E-3; game UUIDs distinct in large schedules.
 
 ---
 

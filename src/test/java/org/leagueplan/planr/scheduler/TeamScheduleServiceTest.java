@@ -472,18 +472,18 @@ class TeamScheduleServiceTest {
   }
 
   @Test
-  @DisplayName("3 teams (odd N) target=5 — each team plays 4 or 5 games (±1 bye tolerance)")
-  void oddNPartialCyclePerTeamCountWithinOneTolerance() {
-    // N=3, N-1=2: fullCycles=5/2=2, remainder=1 → 2 full cycles + 1 partial round
-    // The partial round gives 1 bye: 2 teams get 5 games, 1 team gets 4 games.
+  @DisplayName("3 teams (odd N) target=5 (odd) — succeeds via E-3 top-up; N-1 teams at T, 1 at T+1")
+  void oddNOddTargetFiveSucceeds() {
+    // N=3, T=5: fullCycles=2, remainder=1. After partial: A=4, B=5, C=5.
+    // E-3 top-up: A paired with min-H2H opponent (B, tie-broken by div.teams() order).
+    // Result: A=5, B=6, C=5. Exactly 1 team at T+1; unavoidable (N×T=15 is odd).
     Team a = team("A"), b = team("B"), c = team("C");
     Division div = division("Majors", 5, a, b, c);
     List<TeamGame> games = successGames(generate(league(div)));
 
-    for (Team t : List.of(a, b, c)) {
-      long count = gamesPlayedBy(games, t.id());
-      assertTrue(count >= 4 && count <= 5, "Team " + t.name() + " should play 4 or 5 games; got " + count);
-    }
+    assertEquals(5, gamesPlayedBy(games, a.id()), "A should play exactly 5 games");
+    assertEquals(6, gamesPlayedBy(games, b.id()), "B should play 6 games (top-up opponent)");
+    assertEquals(5, gamesPlayedBy(games, c.id()), "C should play exactly 5 games");
   }
 
   @Test
@@ -620,23 +620,74 @@ class TeamScheduleServiceTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  @DisplayName("3 teams (odd N) target=3 partial cycle log denominator uses M-1=3, not N-1=2")
-  void oddNPartialCycleLogDenominatorIsMRounds() {
-    // N=3 (odd), M=4, M-1=3 rounds per cycle, N-1=2 games per team per cycle.
-    // target=3: fullCycles=3/2=1, remainder=1 → "Partial cycle (1 of 3 rounds) complete"
-    // The denominator must be 3 (M-1 = total rounds in a cycle), not 2 (N-1 = games per team).
+  @DisplayName("3 teams (odd N) target=3 (odd) — succeeds via E-3 top-up; N-1 teams at T, 1 at T+1")
+  void oddNOddTargetThreeSucceeds() {
+    // N=3, T=3: fullCycles=1, remainder=1. After partial: A=2, B=3, C=3.
+    // E-3 top-up: A paired with min-H2H opponent (B, tie-broken by div.teams() order).
+    // Result: A=3, B=4, C=3. Exactly 1 team at T+1; unavoidable (N×T=9 is odd).
+    Team a = team("A"), b = team("B"), c = team("C");
+    Division div = division("Majors", 3, a, b, c);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    assertEquals(3, gamesPlayedBy(games, a.id()), "A should play exactly 3 games");
+    assertEquals(4, gamesPlayedBy(games, b.id()), "B should play 4 games (top-up opponent)");
+    assertEquals(3, gamesPlayedBy(games, c.id()), "C should play exactly 3 games");
+  }
+
+  @Test
+  @DisplayName("3 teams (odd N) target=3 — partial-cycle log reflects post-top-up counts")
+  void oddNOddTargetPartialCycleLogReflectsTopUpCounts() {
+    // Log is emitted after E-3 top-up, so it must show B at 4 (not 3).
     Team a = team("A"), b = team("B"), c = team("C");
     Division div = division("Majors", 3, a, b, c);
     TeamScheduleResult result = generate(league(div));
 
     assertInstanceOf(TeamScheduleResult.Success.class, result);
     List<String> logs = ((TeamScheduleResult.Success) result).cycleLogs();
-
-    assertEquals(2, logs.size(), "Should have 1 full-cycle log + 1 partial-cycle log");
-    assertTrue(logs.get(0).startsWith("Cycle 1 complete:"), logs.get(0));
+    assertEquals(2, logs.size(), "Expect cycle 1 log + partial-cycle log");
+    String partialLog = logs.get(1);
     assertTrue(
-        logs.get(1).startsWith("Partial cycle (1 of 3 rounds) complete:"),
-        "Denominator should be M-1=3, not N-1=2; got: " + logs.get(1));
+        partialLog.startsWith("Partial cycle (1 of 3 rounds) complete:"),
+        "Partial-cycle log prefix: " + partialLog);
+    assertTrue(partialLog.contains("A 3"), "Log should show A at 3: " + partialLog);
+    assertTrue(partialLog.contains("B 4"), "Log should show B at 4 (top-up opponent): " + partialLog);
+    assertTrue(partialLog.contains("C 3"), "Log should show C at 3: " + partialLog);
+  }
+
+  @Test
+  @DisplayName("5 teams (odd N) target=6 (even non-multiple) — all teams reach exactly 6 via E-2 make-up")
+  void fiveTeamsEvenNonMultipleTargetAllReachTarget() {
+    // N=5, N-1=4: fullCycles=1, remainder=2. Two short teams (A and D after partial rounds)
+    // are paired with each other as the E-2 make-up game. All 5 teams end at 6.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D"), e = team("E");
+    Division div = division("Majors", 6, a, b, c, d, e);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    for (Team t : List.of(a, b, c, d, e)) {
+      assertEquals(6, gamesPlayedBy(games, t.id()),
+          "Team " + t.name() + " should play exactly 6 games");
+    }
+  }
+
+  @Test
+  @DisplayName("5 teams (odd N) target=7 (odd) — exactly 1 team plays T+1=8 games via E-3 top-up")
+  void fiveTeamsOddTargetExactlyOneTeamAtTPlus1() {
+    // N=5, T=7, N-1=4: fullCycles=1, remainder=3.
+    // After partial (3 rounds): 3 teams short. E-2 pairs 1 pair → 1 team still short.
+    // E-3 top-up: 1 remaining short team gets 1 extra game against min-H2H opponent.
+    // Result: 4 teams at 7, 1 team at 8.
+    Team a = team("A"), b = team("B"), c = team("C"), d = team("D"), e = team("E");
+    Division div = division("Majors", 7, a, b, c, d, e);
+    List<TeamGame> games = successGames(generate(league(div)));
+
+    long atTarget = List.of(a, b, c, d, e).stream()
+        .filter(t -> gamesPlayedBy(games, t.id()) == 7)
+        .count();
+    long atTargetPlus1 = List.of(a, b, c, d, e).stream()
+        .filter(t -> gamesPlayedBy(games, t.id()) == 8)
+        .count();
+    assertEquals(4L, atTarget, "Exactly 4 teams should be at T=7");
+    assertEquals(1L, atTargetPlus1, "Exactly 1 team should be at T+1=8");
   }
 
   // ---------------------------------------------------------------------------

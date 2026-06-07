@@ -25,9 +25,12 @@ Replace the greedy fill-round phase with a structured multi-cycle round-robin ap
 
 3. Generate `fullCycles` complete round-robin passes using the existing circle method. Each pass continues the circle rotation from where the previous pass ended, preserving home/away balance across cycle boundaries.
 
-4. If `remainder > 0`, generate a partial cycle by continuing from the current rotation state and taking only as many rounds as needed to give each team exactly `remainder` more games. Because each round of the circle method is a perfect 1-factor (every team appears exactly once), taking `remainder` rounds guarantees no pair plays more than once in the partial cycle. For odd-N divisions, some teams will draw a bye in the partial cycle and receive `remainder - 1` games; this ±1 per-team variation is acceptable.
+4. If `remainder > 0`, generate a partial cycle by continuing from the current rotation state and taking only as many rounds as needed. For odd-N divisions, the null bye-slot causes some teams to fall one game short after the partial cycle. Two recovery phases run after the partial cycle rounds to bring every team to T:
 
-**Invariant guaranteed by this approach:** For any two teams in the same division, their head-to-head count will be either `fullCycles` or `fullCycles + 1`. The maximum head-to-head difference between any two pairs in the same division is 1.
+   - **Make-up pairing (even shortfall):** Collect all teams still at T-1. When N is odd and T is even, the shortfall count is always even — pair short teams with each other in sequential order, adding one make-up game per pair. Both teams in each pair advance from T-1 to T.
+   - **Top-up game (odd shortfall):** When N is odd and T is odd, N×T is mathematically odd — it is impossible for every team to reach exactly T with an integer number of games. After make-up pairing, exactly 1 team remains at T-1. Add a single top-up game for that team against the opponent with whom it has the fewest head-to-head meetings (tie-broken by division team list order). The short team reaches T; its opponent unavoidably reaches T+1. This is the minimum achievable deviation.
+
+**Invariant guaranteed by this approach:** For any two teams in the same division, their head-to-head count will be either `fullCycles` or `fullCycles + 1`. The maximum head-to-head difference between any two pairs in the same division is 1. No team finishes below T.
 
 The minimum-target validation (target ≥ N-1) is unchanged. No new configuration fields are introduced.
 
@@ -47,11 +50,11 @@ The minimum-target validation (target ≥ N-1) is unchanged. No new configuratio
 
 1. For any division with N teams and a target of T games per team, every pair of teams plays each other either `floor(T / (N-1))` or `floor(T / (N-1)) + 1` times. No pair plays more than `floor(T / (N-1)) + 1` times.
 
-2. Each team plays exactly T games per season. (Or T-1 if parity prevents exact completion for odd-N divisions — consistent with current behavior.)
+2. Each team plays exactly T games per season with no exceptions for even N, or for odd N with even T. When N is odd and T is odd (making N×T odd), exactly N-1 teams play T games and exactly 1 team plays T+1 games — the minimum achievable deviation. No team may finish below T under any circumstances.
 
 3. When T is exactly divisible by (N-1), all pairs in the division play exactly `T / (N-1)` times. There are no matchup-count differences between any two pairs.
 
-4. The schedule generation output replaces "Fill round K complete: ..." log lines with per-division cycle log lines using the format: "Cycle K complete: &lt;team counts&gt;" for full cycles, and "Partial cycle (R of N-1 rounds) complete: &lt;team counts&gt;" for the partial cycle.
+4. The schedule generation output replaces "Fill round K complete: ..." log lines with per-division cycle log lines using the format: "Cycle K complete: &lt;team counts&gt;" for full cycles, and "Partial cycle (R of N-1 rounds) complete: &lt;team counts&gt;" for the partial cycle. Partial-cycle log lines are emitted after all make-up and top-up games, so counts reflect the final per-team totals including any recovery games.
 
 5. A target that falls between single and double RR thresholds produces a schedule that includes all single-RR matchups, with additional games drawn from a partial second RR cycle (not repeated matchups from the first cycle).
 
