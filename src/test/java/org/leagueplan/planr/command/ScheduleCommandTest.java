@@ -897,9 +897,9 @@ class ScheduleCommandTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("head-to-head flags cells that deviate from the row mode")
-    void headToHeadFlagsCellsDeviatingFromRowMode() {
-      // A hosts B twice, A hosts C once → row A: [—, 2, 1] → mode=1 → 2 is flagged as "2*"
+    @DisplayName("head-to-head flags cells that deviate from the global mode")
+    void headToHeadFlagsCellsDeviatingFromGlobalMode() {
+      // A-B total=2, A-C total=1, B-C total=1 → global mode=1 → A-B pair flagged as "2*"
       UUID divId = UUID.randomUUID();
       UUID idA = UUID.randomUUID(), idB = UUID.randomUUID(), idC = UUID.randomUUID();
       List<TeamGame> games =

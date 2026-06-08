@@ -4,6 +4,33 @@ All notable changes to `planr` are documented here. Each entry references the pr
 
 ---
 
+## [0.14.1] — Symmetric Head-to-Head Matchup Count View
+
+**PRD:** `features/2026-06-07-h2h-matchup-count-view.md`  
+**Spec:** `specs/2026-06-07-h2h-matchup-count-view.md`
+
+The HEAD-TO-HEAD matrix in `planr schedule view` now shows the **total number of games between each pair of teams**, regardless of home/away role. Previously each cell held a directional count (home team × away team), making the matrix asymmetric and duplicating information already covered by the HOME/AWAY BALANCE table. The new symmetric matrix makes it easy to spot pairs that play more or fewer times than the rest of the division. Cells that differ from the most common pairwise count (the global mode) are flagged with `*`; pairs with zero games show `0*` when zero is not the mode. The HOME/AWAY BALANCE table is unchanged.
+
+### Changed
+
+- **`planr schedule view` — HEAD-TO-HEAD matrix** — Both the DRAFT state (`TeamGame` list) and the FINALIZED state (`ScheduledGame` list) now render a symmetric matrix where every cell shows the combined game count for that pair. The header subtitle changes from `(row = home team, column = away team)` to `(total games between each pair)`.
+
+- **Flag logic** — The `*` marker is now driven by the **global mode** across all non-diagonal pairs in the division (upper-triangle collected once per pair), replacing the previous per-row mode. Zero-game pairs are shown as `0*` when zero is not the global mode.
+
+- **`ScheduleCommand.computeGlobalMode`** — New package-private static helper that computes the mode from the upper triangle of the N×N pair-count matrix, with lower-value tie-breaking.
+
+### Tests
+
+- **`ScheduleCommandStatsTest`** — 20 new tests added (was 24, now 44 after deleting 1 obsolete test):
+  - *Deleted (1):* `matrixOrientationIsHomeRowAwayColumn` — directly asserted the old directional contract.
+  - *Updated (6):* subtitle assertion, zero-pair fixture, non-zero count expected value, uniform-values display name, deviating-cell comment, mode-tie-break fixture (replaced complex UUID constructor calls with a simple path-graph arrangement).
+  - *New `HeadToHeadBlock` (5):* `matrixIsSymmetric`; `gamesInBothDirectionsSumToSingleTotal`; `oldHomeAwayAnnotationIsAbsent`; `singlePairProducesNoFlag`; verified `uniformPairCountsProduceNoFlags` passes as-is.
+  - *New `ComputeGlobalMode` (7):* `returnsZeroForNoTeams`; `returnsZeroForSingleTeam`; `returnsPairCountForTwoTeams`; `returnsZeroWhenAllPairsAreZero`; `returnsUniqueValueWhenAllPairsEqual`; `returnsMostFrequentPairCount`; `eachPairCountedOnce` (verifies lower triangle is ignored); `tieBreakChoosesLowerValue`.
+  - *New `ScheduledHeadToHeadBlock` (7):* `headerIncludesDivisionNameAndAnnotation`; `oldHomeAwayAnnotationIsAbsent`; `matrixIsSymmetric`; `gamesInBothDirectionsSumToSingleTotal`; `deviatingCellIsFlagged`; `zeroPairFlaggedWhenNotMode`; `diagonalCellsContainEmDash`; `uniformPairCountsProduceNoFlags`.
+- **`ScheduleCommandTest`** — `headToHeadFlagsCellsDeviatingFromRowMode` renamed to `headToHeadFlagsCellsDeviatingFromGlobalMode`; comment updated. No assertion changes needed (same fixture produces same `"2*"` output under both algorithms).
+
+---
+
 ## [0.14.0] — Balanced Multi-Cycle Matchup Generation
 
 **PRD:** `features/2026-06-05-balanced-multi-rr-matchup-generation.md`

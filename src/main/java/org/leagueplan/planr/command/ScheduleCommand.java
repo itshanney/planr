@@ -1041,23 +1041,13 @@ public class ScheduleCommand implements Runnable {
 
     int[][] matrix = new int[n][n];
     for (TeamGame g : games) {
-      matrix[teamIndex.get(g.homeTeamName())][teamIndex.get(g.awayTeamName())]++;
+      int i = teamIndex.get(g.homeTeamName());
+      int j = teamIndex.get(g.awayTeamName());
+      matrix[i][j]++;
+      matrix[j][i]++;
     }
 
-    int[] rowMode = new int[n];
-    for (int row = 0; row < n; row++) {
-      Map<Integer, Integer> freq = new HashMap<>();
-      for (int col = 0; col < n; col++) {
-        if (col != row) freq.merge(matrix[row][col], 1, Integer::sum);
-      }
-      int maxFreq = freq.values().stream().mapToInt(Integer::intValue).max().orElse(0);
-      rowMode[row] =
-          freq.entrySet().stream()
-              .filter(e -> e.getValue() == maxFreq)
-              .mapToInt(Map.Entry::getKey)
-              .min()
-              .orElse(0);
-    }
+    int globalMode = computeGlobalMode(matrix, n);
 
     String[][] cells = new String[n][n];
     for (int row = 0; row < n; row++) {
@@ -1066,7 +1056,7 @@ public class ScheduleCommand implements Runnable {
           cells[row][col] = "—";
         } else {
           String val = String.valueOf(matrix[row][col]);
-          cells[row][col] = matrix[row][col] != rowMode[row] ? val + "*" : val;
+          cells[row][col] = matrix[row][col] != globalMode ? val + "*" : val;
         }
       }
     }
@@ -1080,7 +1070,7 @@ public class ScheduleCommand implements Runnable {
       }
     }
 
-    System.out.printf("HEAD-TO-HEAD — %s (row = home team, column = away team)%n", divisionName);
+    System.out.printf("HEAD-TO-HEAD — %s (total games between each pair)%n", divisionName);
 
     StringBuilder header = new StringBuilder(" ".repeat(rowLabelW));
     for (int col = 0; col < n; col++) {
@@ -1195,23 +1185,13 @@ public class ScheduleCommand implements Runnable {
 
     int[][] matrix = new int[n][n];
     for (ScheduledGame g : games) {
-      matrix[teamIndex.get(g.homeTeamName())][teamIndex.get(g.awayTeamName())]++;
+      int i = teamIndex.get(g.homeTeamName());
+      int j = teamIndex.get(g.awayTeamName());
+      matrix[i][j]++;
+      matrix[j][i]++;
     }
 
-    int[] rowMode = new int[n];
-    for (int row = 0; row < n; row++) {
-      Map<Integer, Integer> freq = new HashMap<>();
-      for (int col = 0; col < n; col++) {
-        if (col != row) freq.merge(matrix[row][col], 1, Integer::sum);
-      }
-      int maxFreq = freq.values().stream().mapToInt(Integer::intValue).max().orElse(0);
-      rowMode[row] =
-          freq.entrySet().stream()
-              .filter(e -> e.getValue() == maxFreq)
-              .mapToInt(Map.Entry::getKey)
-              .min()
-              .orElse(0);
-    }
+    int globalMode = computeGlobalMode(matrix, n);
 
     String[][] cells = new String[n][n];
     for (int row = 0; row < n; row++) {
@@ -1220,7 +1200,7 @@ public class ScheduleCommand implements Runnable {
           cells[row][col] = "—";
         } else {
           String val = String.valueOf(matrix[row][col]);
-          cells[row][col] = matrix[row][col] != rowMode[row] ? val + "*" : val;
+          cells[row][col] = matrix[row][col] != globalMode ? val + "*" : val;
         }
       }
     }
@@ -1234,7 +1214,7 @@ public class ScheduleCommand implements Runnable {
       }
     }
 
-    System.out.printf("HEAD-TO-HEAD — %s (row = home team, column = away team)%n", divisionName);
+    System.out.printf("HEAD-TO-HEAD — %s (total games between each pair)%n", divisionName);
 
     StringBuilder header = new StringBuilder(" ".repeat(rowLabelW));
     for (int col = 0; col < n; col++) {
@@ -1255,5 +1235,20 @@ public class ScheduleCommand implements Runnable {
       }
       System.out.println(line);
     }
+  }
+
+  static int computeGlobalMode(int[][] matrix, int n) {
+    Map<Integer, Integer> freq = new HashMap<>();
+    for (int row = 0; row < n; row++) {
+      for (int col = row + 1; col < n; col++) {
+        freq.merge(matrix[row][col], 1, Integer::sum);
+      }
+    }
+    int maxFreq = freq.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+    return freq.entrySet().stream()
+        .filter(e -> e.getValue() == maxFreq)
+        .mapToInt(Map.Entry::getKey)
+        .min()
+        .orElse(0);
   }
 }

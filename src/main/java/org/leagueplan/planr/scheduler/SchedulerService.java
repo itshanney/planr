@@ -45,7 +45,11 @@ public class SchedulerService {
   public static final int DEFAULT_FIELD_BUFFER_MINUTES = 0;
   public static final int DEFAULT_GRID_MINUTES = 30;
 
-  private static final int SOLVER_TIME_LIMIT_SECONDS = 300;
+  private static final int SOLVER_TIME_LIMIT_SECONDS = 1800;
+  // CP-SAT allocates native memory (outside JVM heap) for branch-and-bound nodes and learned
+  // clauses. On macOS the OS will SIGKILL the process when overall memory pressure is critical.
+  // Capping native memory here lets the solver return FEASIBLE gracefully instead of being killed.
+  private static final long SOLVER_MEMORY_LIMIT_MB = 2048L;
 
   private record GameVar(BoolVar var, Fixture fixture, Slot slot) {}
 
@@ -521,6 +525,7 @@ public class SchedulerService {
 
     CpSolver solver = new CpSolver();
     solver.getParameters().setMaxTimeInSeconds(SOLVER_TIME_LIMIT_SECONDS);
+    solver.getParameters().setMaxMemoryInMb(SOLVER_MEMORY_LIMIT_MB);
     ProgressCallback callback = new ProgressCallback(SOLVER_TIME_LIMIT_SECONDS);
     CpSolverStatus status = solver.solve(model, callback);
 
@@ -907,6 +912,7 @@ public class SchedulerService {
 
     CpSolver solver = new CpSolver();
     solver.getParameters().setMaxTimeInSeconds(SOLVER_TIME_LIMIT_SECONDS);
+    solver.getParameters().setMaxMemoryInMb(SOLVER_MEMORY_LIMIT_MB);
     ProgressCallback callback = new ProgressCallback(SOLVER_TIME_LIMIT_SECONDS);
     CpSolverStatus status = solver.solve(model, callback);
 
@@ -1256,6 +1262,7 @@ public class SchedulerService {
 
     CpSolver solver = new CpSolver();
     solver.getParameters().setMaxTimeInSeconds(SOLVER_TIME_LIMIT_SECONDS);
+    solver.getParameters().setMaxMemoryInMb(SOLVER_MEMORY_LIMIT_MB);
     ProgressCallback callback = new ProgressCallback(SOLVER_TIME_LIMIT_SECONDS);
     CpSolverStatus status = solver.solve(model, callback);
 

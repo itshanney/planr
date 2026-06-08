@@ -2,12 +2,15 @@ package org.leagueplan.planr.command;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.leagueplan.planr.model.ScheduledGame;
 import org.leagueplan.planr.model.TeamGame;
 
 /**
@@ -218,15 +221,16 @@ class ScheduleCommandStatsTest extends CommandTestBase {
   class HeadToHeadBlock {
 
     @Test
-    @DisplayName("section header includes division name and home/away axis annotation")
+    @DisplayName("section header includes division name and pair-total annotation")
     void sectionHeaderIncludesDivisionNameAndAnnotation() {
       ScheduleCommand.printHeadToHeadBlock(List.of(game("Alpha", "Beta")), "Premier");
       String out = stdout();
       assertTrue(
           out.contains("HEAD-TO-HEAD — Premier"),
           "division name must appear in the section header");
-      assertTrue(out.contains("row = home team"), "header must annotate rows as home team");
-      assertTrue(out.contains("column = away team"), "header must annotate columns as away team");
+      assertTrue(
+          out.contains("total games between each pair"),
+          "header must describe cells as total games between each pair");
     }
 
     @Test
@@ -273,33 +277,30 @@ class ScheduleCommandStatsTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("zero matchup count is displayed as '0', not as a blank")
+    @DisplayName("zero matchup count is displayed as '0*', not as a blank")
     void zeroMatchupDisplaysAsZeroNotBlank() {
-      // Alpha hosts Beta, Beta hosts Gamma, Gamma hosts Alpha — none host the third pair
-      // → matrix[Alpha][Gamma]=0, matrix[Beta][Alpha]=0, matrix[Gamma][Beta]=0
-      List<TeamGame> games =
-          List.of(game("Alpha", "Beta"), game("Beta", "Gamma"), game("Gamma", "Alpha"));
+      // A plays B and C, but B and C never face each other → B-C pair total = 0
+      // Upper-triangle counts: A-B=1, A-C=1, B-C=0 → mode=1 → B-C flagged as "0*"
+      List<TeamGame> games = List.of(game("A", "B"), game("A", "C"));
       ScheduleCommand.printHeadToHeadBlock(games, "Majors");
-      assertTrue(stdout().contains("0"), "cell with zero matchups must print '0', not blank");
+      assertTrue(stdout().contains("0*"), "cell with zero matchups must print '0*' when zero is not the global mode");
     }
 
     @Test
     @DisplayName("non-zero matchup count is displayed as a plain integer")
     void nonZeroMatchupDisplaysAsInteger() {
-      // Alpha hosts Beta 2 times
+      // Alpha and Beta play 3 games total (Alpha hosts twice, Beta hosts once) → symmetric cell = 3
+      // Only one pair exists → global mode = 3 → no flag → cell shown as plain "3"
       List<TeamGame> games =
           List.of(game("Alpha", "Beta"), game("Alpha", "Beta"), game("Beta", "Alpha"));
       ScheduleCommand.printHeadToHeadBlock(games, "Majors");
-      // Row Alpha, col Beta = 2 (mode for row Alpha with 2 values is 2, no flag)
-      // Row Beta, col Alpha = 1 (mode for row Beta is 1, no flag)
-      // Both appear as plain integers somewhere in the output
-      assertTrue(stdout().contains("2"), "a count of 2 must appear as '2'");
+      assertTrue(stdout().contains("3"), "total matchup count of 3 must appear as '3'");
     }
 
     @Test
-    @DisplayName("when all non-diagonal cells in a row are equal, no cell is flagged")
-    void uniformRowValuesProduceNoFlags() {
-      // Each pair plays once in each direction → all non-diagonal = 1 → mode=1 → no flags
+    @DisplayName("when all pair totals are equal, no cell is flagged")
+    void uniformPairCountsProduceNoFlags() {
+      // Each pair plays twice total (once in each direction) → global mode = 2 → no flags
       List<TeamGame> games =
           List.of(
               game("A", "B"), game("B", "A"),
@@ -308,14 +309,14 @@ class ScheduleCommandStatsTest extends CommandTestBase {
       ScheduleCommand.printHeadToHeadBlock(games, "Majors");
       assertFalse(
           stdout().contains("*"),
-          "no cell must be flagged when all non-diagonal values in a row are equal");
+          "no cell must be flagged when all pair totals equal the global mode");
     }
 
     @Test
-    @DisplayName("cell deviating from row mode is flagged with '*' appended directly (no space)")
+    @DisplayName("cell deviating from global mode is flagged with '*' appended directly (no space)")
     void deviatingCellFlaggedWithAsteriskDirectlyAppended() {
-      // A hosts B twice, A hosts C once → row A non-diag = [2, 1] → tie → mode=1 → "2" flagged as
-      // "2*"
+      // A-B total=2, A-C total=1, B-C total=1 → upper-triangle freq {2:1, 1:2} → mode=1
+      // A-B pair shown as "2*"; A-C and B-C shown as plain "1"
       List<TeamGame> games =
           List.of(game("A", "B"), game("A", "B"), game("A", "C"), game("B", "C"));
       ScheduleCommand.printHeadToHeadBlock(games, "Majors");
@@ -327,23 +328,12 @@ class ScheduleCommandStatsTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("when row-mode frequency ties, the lower value is chosen as mode")
+    @DisplayName("when global-mode frequency ties, the lower value is chosen as mode")
     void modeTieBreakChoosesLowerValue() {
-      // Row "A": non-diagonal = [B=1, C=0, D=1, E=0] → freq {1:2, 0:2} → tie → mode=0 → "1" values
-      // flagged
-      // If tie-break were wrong (mode=1), zeros would be flagged as "0*" instead.
-      UUID idA = UUID.nameUUIDFromBytes("A".getBytes());
-      UUID idB = UUID.nameUUIDFromBytes("B".getBytes());
-      UUID idC = UUID.nameUUIDFromBytes("C".getBytes());
-      UUID idD = UUID.nameUUIDFromBytes("D".getBytes());
-      UUID idE = UUID.nameUUIDFromBytes("E".getBytes());
-      List<TeamGame> games =
-          List.of(
-              new TeamGame(UUID.randomUUID(), 1, idA, "A", idB, "B", DIV, "X", 60),
-              new TeamGame(UUID.randomUUID(), 2, idA, "A", idD, "D", DIV, "X", 60),
-              new TeamGame(UUID.randomUUID(), 3, idB, "B", idC, "C", DIV, "X", 60),
-              new TeamGame(UUID.randomUUID(), 4, idC, "C", idE, "E", DIV, "X", 60),
-              new TeamGame(UUID.randomUUID(), 5, idD, "D", idB, "B", DIV, "X", 60));
+      // Path graph: A-B=1, B-C=1, C-D=1, A-C=0, A-D=0, B-D=0
+      // Upper-triangle freq {1:3, 0:3} → tie → mode=0 (lower wins) → "1" pairs flagged as "1*"
+      // If tie-break chose the higher value (mode=1), zeros would appear as "0*" instead.
+      List<TeamGame> games = List.of(game("A", "B"), game("B", "C"), game("C", "D"));
       ScheduleCommand.printHeadToHeadBlock(games, "X");
       String out = stdout();
       assertTrue(
@@ -382,23 +372,271 @@ class ScheduleCommandStatsTest extends CommandTestBase {
     }
 
     @Test
-    @DisplayName("matrix rows represent home team and columns represent away team")
-    void matrixOrientationIsHomeRowAwayColumn() {
-      // Alpha hosts Beta 3 times; Beta never hosts Alpha
-      // → matrix[Alpha][Beta]=3 (row Alpha, col Beta); matrix[Beta][Alpha]=0 (row Beta, col Alpha)
+    @DisplayName("matrix is symmetric: cell[A][B] equals cell[B][A]")
+    void matrixIsSymmetric() {
+      // Alpha hosts Beta 3 times; Beta never hosts Alpha — symmetric total = 3 in both cells
       List<TeamGame> games =
           List.of(game("Alpha", "Beta"), game("Alpha", "Beta"), game("Alpha", "Beta"));
       ScheduleCommand.printHeadToHeadBlock(games, "Majors");
       String[] lines = stdout().split("\n");
-      // lines[3] = Alpha row, lines[4] = Beta row (alphabetical order, after header+sep)
-      String alphaRow = lines[3]; // Alpha as home team
-      String betaRow = lines[4]; // Beta as home team
-      // Alpha row has count=3 in the Beta column (the non-diagonal cell for Beta hosting Alpha=0 is
-      // Beta's row)
-      assertTrue(alphaRow.contains("3"), "row Alpha (home) must show 3 in the Beta (away) column");
+      // lines[0]=header, lines[1]=columns, lines[2]=separator, lines[3]=Alpha row, lines[4]=Beta row
+      String alphaRow = lines[3];
+      String betaRow = lines[4];
+      assertTrue(alphaRow.contains("3"), "Alpha row must show 3 total games vs Beta");
+      assertTrue(betaRow.contains("3"), "Beta row must also show 3 — cell[B][A] must equal cell[A][B]");
+      assertFalse(betaRow.contains("0"), "Beta row must NOT show 0 — directional count has been replaced by pair total");
+    }
+
+    @Test
+    @DisplayName("games in both directions are summed into one pair total")
+    void gamesInBothDirectionsSumToSingleTotal() {
+      // Alpha hosts Beta twice, Beta hosts Alpha once → pair total = 3
+      List<TeamGame> games =
+          List.of(game("Alpha", "Beta"), game("Alpha", "Beta"), game("Beta", "Alpha"));
+      ScheduleCommand.printHeadToHeadBlock(games, "Majors");
+      String out = stdout();
+      assertTrue(out.contains("3"), "both cells must reflect the combined total of 3 games");
+      assertFalse(out.contains("2"), "directional count of 2 must not appear as a standalone cell value");
+      assertFalse(out.contains("1"), "directional count of 1 must not appear as a standalone cell value");
+    }
+
+    @Test
+    @DisplayName("old home/away axis annotation is absent from the header")
+    void oldHomeAwayAnnotationIsAbsent() {
+      ScheduleCommand.printHeadToHeadBlock(List.of(game("Alpha", "Beta")), "Premier");
+      String out = stdout();
+      assertFalse(out.contains("row = home team"), "'row = home team' must not appear in the new header");
+      assertFalse(out.contains("column = away team"), "'column = away team' must not appear in the new header");
+    }
+
+    @Test
+    @DisplayName("single pair produces no flag because every pair equals the global mode")
+    void singlePairProducesNoFlag() {
+      // Only one pair exists → mode = its count → cell is not an outlier → no '*'
+      List<TeamGame> games = List.of(game("Alpha", "Beta"), game("Alpha", "Beta"));
+      ScheduleCommand.printHeadToHeadBlock(games, "Majors");
+      assertFalse(stdout().contains("*"), "with only one pair the cell equals the mode and must not be flagged");
+    }
+
+  }
+
+  // -------------------------------------------------------------------------
+  // computeGlobalMode
+  // -------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("computeGlobalMode")
+  class ComputeGlobalMode {
+
+    @Test
+    @DisplayName("returns 0 when there are no teams (n=0)")
+    void returnsZeroForNoTeams() {
+      assertEquals(0, ScheduleCommand.computeGlobalMode(new int[0][0], 0));
+    }
+
+    @Test
+    @DisplayName("returns 0 when there is exactly one team (no pairs)")
+    void returnsZeroForSingleTeam() {
+      int[][] matrix = {{0}};
+      assertEquals(0, ScheduleCommand.computeGlobalMode(matrix, 1));
+    }
+
+    @Test
+    @DisplayName("returns the pair count when there is exactly one pair (n=2)")
+    void returnsPairCountForTwoTeams() {
+      int[][] matrix = {{0, 5}, {5, 0}};
+      assertEquals(5, ScheduleCommand.computeGlobalMode(matrix, 2));
+    }
+
+    @Test
+    @DisplayName("returns 0 when all pairs have zero games")
+    void returnsZeroWhenAllPairsAreZero() {
+      int n = 4;
+      int[][] matrix = new int[n][n];
+      assertEquals(0, ScheduleCommand.computeGlobalMode(matrix, n));
+    }
+
+    @Test
+    @DisplayName("returns the unique value when all pairs are equal")
+    void returnsUniqueValueWhenAllPairsEqual() {
+      // 3 teams, every pair plays 2 games
+      int[][] matrix = {
+        {0, 2, 2},
+        {2, 0, 2},
+        {2, 2, 0}
+      };
+      assertEquals(2, ScheduleCommand.computeGlobalMode(matrix, 3));
+    }
+
+    @Test
+    @DisplayName("returns the most frequent pair count")
+    void returnsMostFrequentPairCount() {
+      // 4 teams: 5 pairs with count=1, 1 pair with count=3 → mode=1
+      int n = 4;
+      int[][] matrix = {
+        {0, 3, 1, 1},
+        {3, 0, 1, 1},
+        {1, 1, 0, 1},
+        {1, 1, 1, 0}
+      };
+      assertEquals(1, ScheduleCommand.computeGlobalMode(matrix, n));
+    }
+
+    @Test
+    @DisplayName("each pair is counted once — lower triangle does not skew the mode")
+    void eachPairCountedOnce() {
+      // If lower triangle were counted too, the freq table would double every entry identically,
+      // which would not change the mode — but if it were counted asymmetrically (e.g., off-diagonal
+      // mismatch due to a bug), the result would change. We verify upper-triangle-only by constructing
+      // a matrix where lower and upper triangles differ and asserting the upper-triangle value wins.
+      // Upper triangle: (0,1)=2, (0,2)=2, (1,2)=2 → mode=2
+      // Lower triangle (deliberately set differently): (1,0)=99, (2,0)=99, (2,1)=99
+      int[][] matrix = {
+        {0,  2,  2},
+        {99, 0,  2},
+        {99, 99, 0}
+      };
+      assertEquals(2, ScheduleCommand.computeGlobalMode(matrix, 3),
+          "mode must be derived from upper triangle only; lower triangle must be ignored");
+    }
+
+    @Test
+    @DisplayName("tie-break chooses the lower value")
+    void tieBreakChoosesLowerValue() {
+      // 4 teams in a path: upper pairs are (A-B=1, A-C=0, A-D=0, B-C=1, B-D=0, C-D=1)
+      // freq {1:3, 0:3} → tie → lower value = 0
+      int[][] matrix = {
+        {0, 1, 0, 0},
+        {1, 0, 1, 0},
+        {0, 1, 0, 1},
+        {0, 0, 1, 0}
+      };
+      assertEquals(0, ScheduleCommand.computeGlobalMode(matrix, 4),
+          "when frequency ties, the lower value must be chosen as mode");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // printScheduledHeadToHeadBlock
+  // -------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("printScheduledHeadToHeadBlock")
+  class ScheduledHeadToHeadBlock {
+
+    private static final LocalDate DATE = LocalDate.of(2026, 6, 1);
+    private static final LocalTime TIME = LocalTime.of(9, 0);
+    private static final UUID FIELD = UUID.nameUUIDFromBytes("field".getBytes());
+
+    private ScheduledGame scheduledGame(String home, String away) {
+      return new ScheduledGame(
+          UUID.randomUUID(),
+          DATE,
+          TIME,
+          FIELD,
+          "Field 1",
+          UUID.nameUUIDFromBytes(home.getBytes()),
+          home,
+          UUID.nameUUIDFromBytes(away.getBytes()),
+          away,
+          DIV,
+          "Majors",
+          60,
+          false);
+    }
+
+    @Test
+    @DisplayName("section header includes division name and pair-total annotation")
+    void headerIncludesDivisionNameAndAnnotation() {
+      ScheduleCommand.printScheduledHeadToHeadBlock(
+          List.of(scheduledGame("Alpha", "Beta")), "Premier");
+      String out = stdout();
+      assertTrue(out.contains("HEAD-TO-HEAD — Premier"), "division name must appear in the header");
       assertTrue(
-          betaRow.contains("0"),
-          "row Beta (home) must show 0 in the Alpha (away) column — Beta never hosted Alpha");
+          out.contains("total games between each pair"),
+          "header must describe cells as total games between each pair");
+    }
+
+    @Test
+    @DisplayName("old home/away axis annotation is absent from the header")
+    void oldHomeAwayAnnotationIsAbsent() {
+      ScheduleCommand.printScheduledHeadToHeadBlock(
+          List.of(scheduledGame("Alpha", "Beta")), "Premier");
+      String out = stdout();
+      assertFalse(out.contains("row = home team"), "'row = home team' must not appear");
+      assertFalse(out.contains("column = away team"), "'column = away team' must not appear");
+    }
+
+    @Test
+    @DisplayName("matrix is symmetric: cell[A][B] equals cell[B][A]")
+    void matrixIsSymmetric() {
+      // Alpha hosts Beta 2 times; Beta never hosts Alpha → symmetric total = 2 in both cells
+      List<ScheduledGame> games =
+          List.of(scheduledGame("Alpha", "Beta"), scheduledGame("Alpha", "Beta"));
+      ScheduleCommand.printScheduledHeadToHeadBlock(games, "Majors");
+      String[] lines = stdout().split("\n");
+      String alphaRow = lines[3];
+      String betaRow = lines[4];
+      assertTrue(alphaRow.contains("2"), "Alpha row must show total of 2 games vs Beta");
+      assertTrue(betaRow.contains("2"), "Beta row must also show 2 — symmetry requirement");
+      assertFalse(betaRow.contains("0"), "Beta row must NOT show 0 — directional count is gone");
+    }
+
+    @Test
+    @DisplayName("games in both directions are summed into one pair total")
+    void gamesInBothDirectionsSumToSingleTotal() {
+      List<ScheduledGame> games =
+          List.of(
+              scheduledGame("Alpha", "Beta"),
+              scheduledGame("Alpha", "Beta"),
+              scheduledGame("Beta", "Alpha"));
+      ScheduleCommand.printScheduledHeadToHeadBlock(games, "Majors");
+      assertTrue(stdout().contains("3"), "combined total of 3 games must appear in both cells");
+    }
+
+    @Test
+    @DisplayName("cell deviating from global mode is flagged with '*'")
+    void deviatingCellIsFlagged() {
+      // A-B total=2, A-C total=1, B-C total=1 → mode=1 → A-B pair shown as "2*"
+      List<ScheduledGame> games =
+          List.of(
+              scheduledGame("A", "B"),
+              scheduledGame("A", "B"),
+              scheduledGame("A", "C"),
+              scheduledGame("B", "C"));
+      ScheduleCommand.printScheduledHeadToHeadBlock(games, "Majors");
+      assertTrue(stdout().contains("2*"), "pair with count above mode must be flagged with '*'");
+    }
+
+    @Test
+    @DisplayName("zero-total pair is shown as '0*' when zero is not the global mode")
+    void zeroPairFlaggedWhenNotMode() {
+      // A plays B and C; B and C never play → B-C total=0, mode=1 → "0*"
+      List<ScheduledGame> games =
+          List.of(scheduledGame("A", "B"), scheduledGame("A", "C"));
+      ScheduleCommand.printScheduledHeadToHeadBlock(games, "Majors");
+      assertTrue(stdout().contains("0*"), "zero-game pair must appear as '0*' when zero is not the mode");
+    }
+
+    @Test
+    @DisplayName("diagonal cells contain the em dash character (U+2014)")
+    void diagonalCellsContainEmDash() {
+      ScheduleCommand.printScheduledHeadToHeadBlock(
+          List.of(scheduledGame("Alpha", "Beta")), "Majors");
+      assertTrue(stdout().contains("—"), "diagonal cells must show '—' (U+2014)");
+    }
+
+    @Test
+    @DisplayName("when all pair totals are equal, no cell is flagged")
+    void uniformPairCountsProduceNoFlags() {
+      // Each pair plays twice total (once each direction) → mode=2 → no flags
+      List<ScheduledGame> games =
+          List.of(
+              scheduledGame("A", "B"), scheduledGame("B", "A"),
+              scheduledGame("A", "C"), scheduledGame("C", "A"),
+              scheduledGame("B", "C"), scheduledGame("C", "B"));
+      ScheduleCommand.printScheduledHeadToHeadBlock(games, "Majors");
+      assertFalse(stdout().contains("*"), "no cell must be flagged when all pair totals equal the mode");
     }
   }
 }
