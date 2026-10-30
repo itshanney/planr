@@ -1,0 +1,144 @@
+[[fields]]
+== Fields
+
+A field is a place where games and practices are played. By default, every field is open from the
+league sunrise to sunset on every day of the season. You record exceptions with blocks, date
+overrides, and division locks. <<availability>> explains how these combine.
+
+=== Managing fields
+
+[source]
+----
+planr field add <name> [--address <address>]
+planr field edit <name> [--name <new-name>] [--address <address>]
+                        [--playoff-priority <n>] [--no-playoff-priority]
+planr field delete <name>
+planr field list
+----
+
+* To clear an address, pass `--address ""`.
+* Deleting a field also deletes its blocks, overrides, and locks.
+
+.Example
+[source,console]
+----
+$ planr field add "Riverside Park" --address "100 River Rd"
+Field "Riverside Park" added.
+
+$ planr field list
+NAME              ADDRESS         BLOCKS    OVERRIDES    LOCKS    PLAYOFF_PRI
+--------------    ------------    ------    ---------    -----    -----------
+Riverside Park    100 River Rd    1         0            0        --
+Hillside Field    (none)          0         1            0        --
+----
+
+[[field-playoff-priority]]
+==== Playoff field priority
+
+[source]
+----
+planr field edit <name> --playoff-priority <n>
+planr field edit <name> --no-playoff-priority
+----
+
+A playoff priority ranks a field for playoff scheduling. Lower numbers are preferred, and `1` is
+the most preferred. The playoff solver treats the ranking as a preference, not a rule. It fills
+ranked fields first, then uses lower-ranked or unranked fields rather than leave games unassigned.
+
+* `--playoff-priority` must be a whole number of 1 or more.
+* `--no-playoff-priority` removes the rank. Running it on an unranked field does nothing.
+* You can't pass both flags together.
+* Unranked fields are used only after every ranked field is full.
+* The ranking has *no effect* on regular-season or practice scheduling.
+
+[[field-blocks]]
+=== Field blocks
+
+A block closes a field for a time range on one date, for example for a holiday or maintenance. The
+block is cut out of that date's open window.
+
+[source]
+----
+planr field block add <field> --date <YYYY-MM-DD> --start <HH:mm> --end <HH:mm>
+planr field block edit <field> <number> [--date <YYYY-MM-DD>] [--start <HH:mm>] [--end <HH:mm>]
+planr field block delete <field> <number>
+planr field block list <field>
+----
+
+`<number>` is the block's 1-based number from `field block list`.
+
+.Example
+[source,console]
+----
+$ planr field block add "Riverside Park" --date 2026-07-04 --start 00:00 --end 23:59
+Block #1 added to "Riverside Park" (2026-07-04, 00:00–23:59).
+----
+
+[[field-overrides]]
+=== Field date overrides
+
+An override sets custom open hours for one field on one date, for example extended evening
+lighting or an early close on a school night. The override takes the place of the sunrise/sunset
+times, any day-of-week window, and any blocked day for that field on that date.
+
+[source]
+----
+planr field override add <field> --date <YYYY-MM-DD> --start <HH:mm> --end <HH:mm>
+planr field override edit <field> <number> [--date <YYYY-MM-DD>] [--start <HH:mm>] [--end <HH:mm>]
+planr field override delete <field> <number>
+planr field override list <field>
+----
+
+* A field can have at most one override per date.
+* Blocks for that date still apply within the override's hours.
+
+.Example
+[source,console]
+----
+$ planr field override add "Hillside Field" --date 2026-07-11 --start 08:00 --end 21:00
+Override #1 added to "Hillside Field" (2026-07-11, open 08:00–21:00).
+
+$ planr field override list "Hillside Field"
+#    DATE        OPEN START  OPEN END
+-    ----------  ----------  --------
+1    2026-07-11  08:00       21:00
+----
+
+[[field-locks]]
+=== Field division locks
+
+A division lock reserves a field for one division over a date range. Use one for a field that
+suits only one age group, such as a T-ball infield, or for part of the season.
+
+[source]
+----
+planr field lock add    --field <name> --division <name> --start <YYYY-MM-DD> --end <YYYY-MM-DD>
+planr field lock delete --field <name> --index <N>
+planr field lock list   [--field <name>]
+----
+
+A lock works in both directions during its date range (start and end dates included):
+
+* *Other divisions* can't use the locked field.
+* *The lock's division* plays only on the locked field. Its slots on other fields are removed for
+  those dates.
+
+Rules:
+
+* `--end` can't be earlier than `--start`.
+* A new lock can't overlap an existing lock on the same field, whatever its division.
+  Non-overlapping locks on the same field are allowed.
+* `--index` is the lock's 1-based number from `field lock list`.
+* `schedule assign` lists the active locks in its constraint summary so you can check them.
+
+.Example
+[source,console]
+----
+$ planr field lock add --field "Hillside Field" --division Majors --start 2026-06-01 --end 2026-06-30
+Division lock #1 added: "Hillside Field" locked to "Majors" from 2026-06-01 to 2026-06-30.
+
+$ planr field lock list
+FIELD           #  DIVISION  START       END
+--------------  -  --------  ----------  ----------
+Hillside Field  1  Majors    2026-06-01  2026-06-30
+----

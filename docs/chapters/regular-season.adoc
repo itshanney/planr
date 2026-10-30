@@ -1,0 +1,226 @@
+[[regular-season]]
+== Regular-season schedule
+
+You build the regular-season schedule in two phases, with a review step in between. See
+<<schedule-lifecycle>> for the states the schedule passes through.
+
+[[schedule-generate]]
+=== Phase 1: generate matchups
+
+[source]
+----
+planr schedule generate
+----
+
+This creates matchups for every eligible division using a multi-cycle round-robin. Each pair of
+teams in a division plays either `floor(T/(N−1))` or `floor(T/(N−1)) + 1` times, where *N* is the
+number of teams and *T* is the division's target. So the number of meetings between any two pairs
+differs by at most one. <<phase1-algorithm>> describes the algorithm.
+
+*Prerequisites:* season dates are set, at least one division has two or more teams, and each
+division's target is at least N−1.
+
+`generate` prints a progress line for each round-robin cycle, the full matchup table, and a
+summary. If a team schedule or draft already exists, it asks before replacing it. It refuses to
+run once the schedule is finalized.
+
+.Example
+[source,console]
+----
+$ planr schedule generate
+Cycle 1 complete: Blue Jays 3, Cardinals 3, Red Sox 3, Yankees 3
+Cycle 2 complete: Blue Jays 6, Cardinals 6, Red Sox 6, Yankees 6
+
+Team schedule generated: 12 games across 1 division(s).
+
+#   HOME                AWAY                DIVISION
+--  ------------------  ------------------  --------
+1   Blue Jays           Yankees             Majors
+2   Red Sox             Cardinals           Majors
+3   Red Sox             Blue Jays           Majors
+...
+12  Red Sox             Yankees             Majors
+
+Review the matchups. Run 'planr schedule game edit <#> --home <team>' to adjust home/away.
+Run 'planr schedule assign' when ready to assign dates, times, and fields.
+----
+
+=== Review: adjust home and away
+
+[source]
+----
+planr schedule game edit <number> --home <team>
+----
+
+Makes `<team>` the home team for game `<number>`, and the other team the away team. This works in
+the `TEAM_SCHEDULE` and `DRAFT` states. If the team is already at home, nothing changes.
+
+[[schedule-assign]]
+=== Phase 2: assign dates, times, and fields
+
+[source]
+----
+planr schedule assign
+----
+
+This runs the CP-SAT solver to give each game a date, start time, and field, following every
+availability rule (<<availability>>) and constraint (<<scheduling-constraints>>). Before the solver
+starts, the command shows a summary of the schedule and the active constraints, then asks for
+confirmation. Type `yes` to continue.
+
+*Prerequisites:* a team schedule exists, at least one field exists, and sunrise, sunset, and the
+season dates are set.
+
+While the solver runs, progress lines prefixed with elapsed time (`[M:SS]`) are printed. The solver
+can run for up to five minutes. When it finishes, the command prints a constraint summary and saves
+a *draft*, even if not every game could be placed.
+
+.Example
+[source,console]
+----
+$ echo yes | planr schedule assign
+Team schedule: 12 games across 1 division(s) (Majors 12).
+Scheduling constraints: max 2 game(s)/week per team, min 1 rest day(s) between games.
+Confirm this team schedule and begin field assignment? This may take up to 5 minutes. Type 'yes' to continue:
+[0:00] Phase 2 started. 12 games across 1 division(s).
+[0:00] Feasibility check passed. Solver started. 12 games across 1 division(s).
+[0:01] Solver complete. 12 of 12 games assigned (target-met, optimal).
+Constraint Summary
+------------------
+DIVISION  GAMES  SLOTS  USED/AVAIL  STATUS
+--------  -----  -----  ----------  ----------
+Majors       12   2155  12/2155     target-met
+All targets met. 12 of 12 games assigned.
+Active constraints: max 2 game(s)/week per team, min 1 rest day(s) between games.
+Draft schedule saved: 12 games assigned (target-met, optimal distribution). Run 'planr schedule view' to review.
+----
+
+TIP: If some games stay unassigned, give the solver more room. Lengthen the season, add field
+time, raise `--max-games-per-week`, or lower `--rest-days`. Then run `schedule assign` again.
+
+=== Viewing the schedule
+
+[source]
+----
+planr schedule view [--division <name>] [--team <name>] [--field <name>]
+planr schedule status
+----
+
+`view` output depends on the schedule state:
+
+`TEAM_SCHEDULE`::
+The matchup table (`#`, `HOME`, `AWAY`, `DIVISION`), followed by a *HOME/AWAY BALANCE* table and a
+*HEAD-TO-HEAD* matrix for each division. `--division` and `--team` filter the table and the stat
+blocks. `--field` is rejected because no fields have been assigned yet.
+
+`DRAFT` / `FINALIZED`::
+The full table, including date, start time, and field. The stat blocks appear when you use no
+filter or only `--division`. They are hidden when you use `--team` or `--field`. Games changed
+with `game override` are marked `*`.
+
+The HEAD-TO-HEAD matrix shows the *total* number of games between each pair of teams. A cell that
+differs from the most common pair count in the division is marked `*`, which makes uneven pairings
+easy to spot.
+
+.Example: matchup review
+[source,console]
+----
+$ planr schedule view
+Schedule status: TEAM_SCHEDULE
+...
+HOME/AWAY BALANCE — Majors
+TEAM       HOME  AWAY  TOTAL  BALANCE
+---------  ----  ----  -----  -------
+Blue Jays     3     3      6        0
+Cardinals     3     3      6        0
+Red Sox       3     3      6        0
+Yankees       3     3      6        0
+TOTAL        12    12     24
+
+HEAD-TO-HEAD — Majors (total games between each pair)
+           Blue Jays  Cardinals  Red Sox  Yankees
+---------  ---------  ---------  -------  -------
+Blue Jays  —          2          2        2
+Cardinals  2          —          2        2
+Red Sox    2          2          —        2
+Yankees    2          2          2        —
+----
+
+.Example: one team's draft schedule
+[source,console]
+----
+$ planr schedule view --team Yankees
+Schedule status: DRAFT | Season: 2026-06-01 to 2026-08-31
+
+#   DATE        START  FIELD           HOME       AWAY       DIVISION
+--  ----------  -----  --------------  ---------  ---------  --------
+1   2026-06-05  11:00  Hillside Field  Cardinals  Yankees    Majors
+2   2026-06-10  16:00  Riverside Park  Yankees    Blue Jays  Majors
+5   2026-07-01  16:00  Riverside Park  Yankees    Red Sox    Majors
+...
+----
+
+`status` shows the current state and game counts for each division:
+
+[source,console]
+----
+$ planr schedule status
+Status:        DRAFT
+Season:        2026-06-01 to 2026-08-31
+Total games:   12
+  Majors:              12 games
+----
+
+=== Exporting
+
+[source]
+----
+planr schedule export
+----
+
+Writes the schedule to standard output as a JSON array. Redirect it to a file, or pipe it to
+another tool.
+
+[cols="1,3",options="header"]
+|===
+| State | Fields per game
+| `TEAM_SCHEDULE` | `game_number`, `home_team`, `away_team`, `division_name`
+| `DRAFT` / `FINALIZED` | `date`, `start_time`, `field_name`, `home_team`, `away_team`, `division_name`, `status`
+|===
+
+[source,json]
+----
+[ {
+  "date" : "2026-06-05",
+  "status" : "draft",
+  "start_time" : "11:00",
+  "field_name" : "Hillside Field",
+  "home_team" : "Cardinals",
+  "away_team" : "Yankees",
+  "division_name" : "Majors"
+}, ... ]
+----
+
+=== Finalizing
+
+[source]
+----
+planr schedule finalize
+----
+
+Promotes a draft to `FINALIZED` after you confirm.
+
+CAUTION: Finalizing can't be undone. A finalized schedule can't be regenerated or reassigned.
+
+[[schedule-override]]
+=== Overriding individual games
+
+[source]
+----
+planr schedule game override <number> [--date <YYYY-MM-DD>] [--start <HH:mm>]
+                                      [--field <name>] [--home <team>] [--away <team>]
+----
+
+Changes one game on a finalized schedule, for example to reschedule a rainout. You can change any
+combination of fields. If the change creates a field conflict, a warning is printed to standard
+error but the change is still saved. Overridden games are marked `*` in `schedule view`.

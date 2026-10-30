@@ -1,0 +1,113 @@
+[appendix]
+[[command-reference]]
+== Command reference
+
+A one-page summary of every command. For full details, see the chapter linked in each section, or
+run any command with `--help`.
+
+=== Global
+
+[cols="2,3",options="header"]
+|===
+| Command | Description
+| `planr --help` | List top-level commands.
+| `planr --version` | Print the version.
+| `planr help <command>` | Show help for a command.
+|===
+
+=== `config` (<<configuration>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `config set [--sunrise] [--sunset] [--start] [--end] [--max-games-per-week] [--rest-days] [--field-buffer-minutes] [--grid-minutes]` | Set league-wide values.
+| `config show` | Show the configuration.
+| `config dow set --day <DAY> --start <HH:mm> --end <HH:mm>` | Set a day-of-week window.
+| `config dow clear --day <DAY>` | Remove a day-of-week window.
+| `config dow list` | List day-of-week windows.
+| `config blockday add --day <DAY>` | Block a weekday for all fields.
+| `config blockday remove --day <DAY>` | Unblock a weekday.
+| `config blockday list` | List blocked weekdays.
+|===
+
+=== `division` and `team` (<<divisions-and-teams>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `division add <name> --duration <min> --target <n>` | Add a division.
+| `division edit <name> [--name] [--duration] [--target] [--curfew-time \| --no-curfew-time] [--practice-count] [--practice-duration-minutes] [--practice-start] [--practice-end]` | Edit a division.
+| `division delete <name>` | Delete a division that has no teams.
+| `division list` | List divisions.
+| `team add <division> <team>` | Add a team.
+| `team edit <division> <team> --name <new>` | Rename a team.
+| `team delete <division> <team>` | Remove a team.
+| `team list <division>` | List a division's teams.
+|===
+
+=== `field` (<<fields>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `field add <name> [--address]` | Add a field.
+| `field edit <name> [--name] [--address] [--playoff-priority <n> \| --no-playoff-priority]` | Edit a field.
+| `field delete <name>` | Delete a field and everything attached to it.
+| `field list` | List fields.
+| `field block add <field> --date --start --end` | Add a block.
+| `field block edit <field> <#> [--date] [--start] [--end]` | Edit a block.
+| `field block delete <field> <#>` | Delete a block.
+| `field block list <field>` | List a field's blocks.
+| `field override add <field> --date --start --end` | Add a date override.
+| `field override edit <field> <#> [--date] [--start] [--end]` | Edit an override.
+| `field override delete <field> <#>` | Delete an override.
+| `field override list <field>` | List a field's overrides.
+| `field lock add --field --division --start --end` | Lock a field to a division.
+| `field lock delete --field --index <N>` | Delete a lock.
+| `field lock list [--field]` | List locks.
+|===
+
+=== `schedule` (<<regular-season>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `schedule generate` | Phase 1: generate matchups.
+| `schedule assign` | Phase 2: assign dates, times, and fields.
+| `schedule view [--division] [--team] [--field]` | View the schedule and balance statistics.
+| `schedule status` | Show the schedule state and counts.
+| `schedule export` | Write the schedule as JSON to standard output.
+| `schedule finalize` | Lock the draft. Can't be undone.
+| `schedule game edit <#> --home <team>` | Swap home and away before finalizing.
+| `schedule game override <#> [--date] [--start] [--field] [--home] [--away]` | Change a finalized game.
+|===
+
+=== `practice` (<<practices>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `practice generate` | Phase 1: create practice slots.
+| `practice assign` | Phase 2: assign fields and times.
+| `practice view [--division]` | View practice status or slots.
+| `practice clear --division <name>` | Delete a division's practice schedule.
+|===
+
+=== `playoff` (<<playoffs>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `playoff generate --division --start --end --seeds <team>...` | Phase 1: build a bracket.
+| `playoff assign` | Phase 2: assign fields and times.
+| `playoff status [--division]` | View playoff status or a bracket.
+| `playoff clear --division <name>` | Delete a division's bracket.
+|===
+
+=== `calendar` (<<calendar>>)
+
+[cols="3,2",options="header"]
+|===
+| Command | Description
+| `calendar [--weekly \| --monthly] [--week] [--month] [--division] [--team] [--field]` | Calendar of all assigned events.
+|===

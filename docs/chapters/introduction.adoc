@@ -1,0 +1,64 @@
+[[introduction]]
+== Introduction
+
+Scheduling a little league season by hand means juggling dozens of constraints. Every team should
+play a fair share of home games and face each opponent about equally often. Nobody plays twice in a
+day. Fields close for holidays and maintenance. Younger divisions can't start games late in the
+evening. `planr` captures those rules as data and uses a constraint solver to produce a schedule
+that satisfies them.
+
+=== What planr does
+
+`planr` manages four kinds of league data:
+
+League configuration:: Season dates, daily field hours, and league-wide scheduling limits.
+Divisions and teams:: Age or skill groups, the teams in each, and per-division game length,
+season target, curfew, and practice settings.
+Fields:: Places to play, plus exceptions to their normal hours: blocks, date overrides, and
+division locks.
+Schedules:: The regular-season schedule, pre-season practices, and double-elimination playoff
+brackets.
+
+=== The two-phase pattern
+
+Regular-season games, practices, and playoffs are all scheduled in two phases:
+
+. *Generate* -- decide _what_ needs to be scheduled. For the regular season this is the list of
+  matchups with home and away teams. For practices it is one slot per team per practice. For
+  playoffs it is the bracket.
+. *Assign* -- decide _when and where_. The OR-Tools CP-SAT solver picks a date, start time, and field
+  for each item, respecting every availability rule and scheduling constraint.
+
+You review the output between the two phases. For the regular season you can also change home/away
+assignments before any dates are fixed.
+
+=== Where data is stored
+
+All state lives in a single JSON file:
+
+----
+~/.planr/league.json
+----
+
+Every command that changes data reads the file, builds an updated copy, and replaces the original
+in one atomic step, so an interrupted write can't corrupt it. See <<data-file>> for the file
+format and how upgrades are handled.
+
+=== General conventions
+
+* Division, team, and field names are matched *case-insensitively*. `majors`, `Majors`, and
+  `MAJORS` all refer to the same division.
+* Dates use ISO format, `YYYY-MM-DD`. Times use 24-hour `HH:mm`.
+* Names that contain spaces must be quoted: `planr team add Majors "Red Sox"`.
+* Output goes to standard output. Errors go to standard error.
+* Every command accepts `--help` (for example, `planr field lock add --help`).
+
+[[exit-codes]]
+.Exit codes
+[cols="1,4",options="header"]
+|===
+| Code | Meaning
+| `0`  | Success.
+| `1`  | Validation error: bad input, a missing prerequisite, or a rule violation.
+| `2`  | I/O error reading or writing `league.json`.
+|===

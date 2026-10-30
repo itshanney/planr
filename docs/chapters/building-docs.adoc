@@ -1,0 +1,55 @@
+[appendix]
+[[building-docs]]
+== Building this guide
+
+This guide is written in https://asciidoc.org[AsciiDoc]. It is rendered with
+https://asciidoctor.org[Asciidoctor] through the AsciidoctorJ Gradle plugins. HTML uses the
+standard Asciidoctor stylesheet, and PDF uses the standard Asciidoctor PDF theme. Both editions come
+from the same source files.
+
+=== Source layout
+
+----
+docs/
+├── index.adoc          ← the main document: title, attributes, and the list of chapters
+└── chapters/
+    ├── introduction.adoc
+    ├── getting-started.adoc
+    ├── ...
+    └── building-docs.adoc
+----
+
+Only `index.adoc` is rendered directly. The chapter files are pulled in with `include::` directives,
+so a chapter you add appears in both editions once it is listed in `index.adoc`.
+
+=== Rendering
+
+[source,console]
+----
+$ gradle docs             # HTML and PDF
+$ gradle asciidoctor      # HTML only
+$ gradle asciidoctorPdf   # PDF only
+----
+
+[cols="1,3",options="header"]
+|===
+| Edition | Output
+| HTML | `build/docs/asciidoc/index.html`
+| PDF  | `build/docs/asciidocPdf/index.pdf`
+|===
+
+The project version from `build.gradle` is passed to the guide as the `revnumber` attribute, so the
+title page always shows the version the guide was built from.
+
+=== Writing tips
+
+* Start each chapter with an anchor (`[[my-chapter]]`) and a level-1 heading (`== Title`). Link to it
+  from elsewhere with `\<<my-chapter>>`.
+* Use `[source,console]` for terminal sessions and plain `[source]` for usage syntax.
+* Capture example output from a real run, not from memory. To avoid touching your real league data,
+  point `planr` at a scratch home directory:
++
+[source,console]
+----
+$ JAVA_OPTS="-Duser.home=/tmp/planr-docs" planr division list
+----

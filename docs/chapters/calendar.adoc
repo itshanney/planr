@@ -1,0 +1,62 @@
+[[calendar]]
+== Calendar view
+
+`planr calendar` shows assigned regular-season games, playoff games, and practices together, as a
+weekly list or a monthly grid.
+
+[source]
+----
+planr calendar [--weekly | --monthly]
+               [--week <YYYY-MM-DD>] [--month <YYYY-MM>]
+               [--division <name>] [--team <name>] [--field <name>]
+----
+
+[cols="1,3",options="header"]
+|===
+| Option | Description
+
+| `--weekly`
+| Day-by-day listing for one Sunday-to-Saturday week. This is the default.
+
+| `--monthly`
+| A calendar grid with counts for each event type, followed by a list of the month's events in
+date order.
+
+| `--week`
+| Any date in the week to show (weekly mode only). Defaults to the earliest week that has an
+assigned event.
+
+| `--month`
+| The month to show (monthly mode only). Defaults to the earliest month that has an assigned event.
+
+| `--division`, `--team`, `--field`
+| Show only events for that division, team, or field.
+|===
+
+Events are tagged by type: `[G]` for a regular-season game, `[PO]` for a playoff game, and `[P]` for
+a practice. Only events with an assigned date appear.
+
+NOTE: `--team` leaves out playoff games, because bracket positions such as `W of G3` can't be
+matched to a team until the bracket is played. Use `--division` to include playoffs.
+
+You can't combine `--week` with `--monthly`, or `--month` with `--weekly`.
+
+.Example
+[source,console]
+----
+$ planr calendar --week 2026-06-03
+Week of 2026-05-31 (Sun) — 2026-06-06 (Sat)
+
+  SUN 2026-05-31
+    (no events)
+
+  ...
+
+  FRI 2026-06-05
+    11:00  [G]  Cardinals vs Yankees  @  Hillside Field  (Majors)
+
+  SAT 2026-06-06
+    (no events)
+
+1 events this week  (G: 1  PO: 0  P: 0)
+----

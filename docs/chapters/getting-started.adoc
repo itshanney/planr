@@ -1,0 +1,138 @@
+[[getting-started]]
+== Getting started
+
+=== Requirements
+
+* JDK 25
+* Gradle 9.4.1 (the project has no Gradle wrapper, so `gradle` must be on your `PATH`)
+
+=== Building and installing
+
+From the project root:
+
+[source,console]
+----
+$ gradle installDist
+----
+
+This creates a runnable launcher at `build/install/planr/bin/planr`. Add that directory to your
+`PATH`, or run the launcher directly. The examples in this guide assume `planr` is on your `PATH`.
+
+Check the installation:
+
+[source,console]
+----
+$ planr --version
+----
+
+=== A first season in ten minutes
+
+This walkthrough sets up one division of four teams on two fields, then schedules the season. Each
+step links to the chapter that covers it in detail.
+
+==== 1. Configure the season
+
+Set the daily field hours and the season dates (<<configuration>>):
+
+[source,console]
+----
+$ planr config set --sunrise 09:00 --sunset 18:00 --start 2026-06-01 --end 2026-08-31
+League config updated.
+----
+
+Optionally, block Sundays and give Wednesdays evening-only hours:
+
+[source,console]
+----
+$ planr config blockday add --day sunday
+Sunday added to blocked days.
+
+$ planr config dow set --day wednesday --start 16:00 --end 21:00
+Day-of-week window set: Wednesday 16:00–21:00.
+----
+
+==== 2. Add a division and its teams
+
+Each division has a game length and a target number of games per team
+(<<divisions-and-teams>>):
+
+[source,console]
+----
+$ planr division add Majors --duration 120 --target 6
+Division "Majors" added (120 min/game, target 6 games/team).
+
+$ planr team add Majors "Blue Jays"
+$ planr team add Majors Cardinals
+$ planr team add Majors "Red Sox"
+$ planr team add Majors Yankees
+----
+
+==== 3. Add fields
+
+[source,console]
+----
+$ planr field add "Riverside Park" --address "100 River Rd"
+Field "Riverside Park" added.
+
+$ planr field add "Hillside Field"
+Field "Hillside Field" added.
+----
+
+Record exceptions such as a holiday closure (<<fields>>):
+
+[source,console]
+----
+$ planr field block add "Riverside Park" --date 2026-07-04 --start 00:00 --end 23:59
+Block #1 added to "Riverside Park" (2026-07-04, 00:00–23:59).
+----
+
+==== 4. Generate matchups (Phase 1)
+
+[source,console]
+----
+$ planr schedule generate
+Cycle 1 complete: Blue Jays 3, Cardinals 3, Red Sox 3, Yankees 3
+Cycle 2 complete: Blue Jays 6, Cardinals 6, Red Sox 6, Yankees 6
+
+Team schedule generated: 12 games across 1 division(s).
+
+#   HOME                AWAY                DIVISION
+--  ------------------  ------------------  --------
+1   Blue Jays           Yankees             Majors
+2   Red Sox             Cardinals           Majors
+...
+----
+
+Review the matchups with `planr schedule view`. To swap home and away for a game, use
+`planr schedule game edit <#> --home <team>`.
+
+==== 5. Assign dates, times, and fields (Phase 2)
+
+`schedule assign` asks for confirmation before it starts the solver. Type `yes`, or pipe it in:
+
+[source,console]
+----
+$ echo yes | planr schedule assign
+...
+[0:01] Solver complete. 12 of 12 games assigned (target-met, optimal).
+...
+Draft schedule saved: 12 games assigned (target-met, optimal distribution). Run 'planr schedule view' to review.
+----
+
+==== 6. Review, finalize, and export
+
+[source,console]
+----
+$ planr schedule view
+$ planr schedule finalize
+$ planr schedule export > schedule.json
+----
+
+WARNING: Finalizing can't be undone. After finalizing, you can still change individual games
+with `planr schedule game override` (<<schedule-override>>).
+
+==== What next
+
+* Schedule pre-season practices: <<practices>>.
+* Run end-of-season playoffs: <<playoffs>>.
+* View everything on a calendar: <<calendar>>.

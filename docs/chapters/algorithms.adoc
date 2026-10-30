@@ -1,0 +1,189 @@
+[[algorithms]]
+== How scheduling works
+
+This chapter explains the algorithms behind `schedule generate` and `schedule assign`. You don't need
+it for day-to-day use. It helps when you want to know why the scheduler made a particular choice, or
+why some games weren't assigned.
+
+[[phase1-algorithm]]
+=== Phase 1: building balanced matchups
+
+`planr schedule generate` uses a multi-cycle *circle-method round-robin*. For a division with *N*
+teams and a target of *T* games per team, it computes:
+
+* `fullCycles = floor(T / (N−1))`, the number of complete round-robins
+* `remainder = T mod (N−1)`, the number of extra rounds needed after the full cycles.
+
+[IMPORTANT]
+.Invariant
+====
+Any two teams in a division play each other either `fullCycles` or `fullCycles + 1` times. Across
+all pairs in a division, the number of meetings differs by at most one.
+====
+
+==== Circle-method rounds
+
+Every round is produced by the same rotating circle:
+
+. One team stays fixed. The other `N−1` teams form a rotating list.
+. If N is odd, an empty "bye" position is added so the count is even.
+. Each round reads `N/2` pairs from the circle:
+** Pair 0 is the fixed team against the last position in the rotating list.
+** Pairs 1 to `N/2−1` are `rotating[i−1]` against `rotating[N−2−i]`, mirrored around the center.
+** Any pair that includes the bye is dropped.
+. After each round, the last team in the rotating list moves to the front.
+
+One full cycle has `N−1` rounds and produces `N(N−1)/2` games, one for every pair of teams.
+
+==== Full and partial cycles
+
+The full cycles run back to back, and the rotation is *never reset* between them. Each cycle
+therefore pairs teams in a different order, which improves home/away balance over the season.
+
+If `remainder > 0`, a partial cycle runs `remainder` more rounds from where the rotation left off.
+No pair meets twice in the partial cycle, so no pair goes over `fullCycles + 1` meetings.
+
+When N is odd, the byes in the partial cycle don't land evenly, so some teams end up one game short.
+Two follow-up steps fix this:
+
+Make-up pairing (even T):: When N is odd and T is even, the number of short teams is always even.
+The short teams are paired with each other, which brings every team to exactly T.
+
+Top-up game (odd T):: When N and T are both odd, N×T is odd, so not every team can finish at
+exactly T. After the make-up pairing, one team is still at T−1. It gets one extra game against the opponent
+it has met least often. Ties go to the opponent listed first in the division. That opponent finishes
+at T+1, the smallest possible imbalance.
+
+==== Home and away
+
+Home and away are set by a *global round index*, `globalRound`. It starts at 0 and counts every
+round across all cycles without resetting:
+
+[source,java]
+----
+leftIsHome = ((specI + globalRound) % 2 == 0)
+----
+
+`specI` is the pair's column in the circle: 0 for the fixed-team pair, 1 for the first rotating
+pair, and so on. Because `globalRound` never resets, home and away keep alternating across cycle
+boundaries. With an even number of teams and a target that is an exact number of full cycles (for
+example a double round-robin), every team plays exactly half its games at home.
+
+==== Game numbers
+
+After all rounds are generated, games get stable numbers starting at 1. Each division's games are
+numbered together, in cycle order and then round order, before the next division's games.
+
+==== Worked example: 4 teams, target 6
+
+With N = 4, `fullCycles = 2` and `remainder = 0`.
+
+[cols="1,1,2,2",options="header"]
+|===
+| Cycle | Round | Pair 1 (home–away) | Pair 2 (home–away)
+| 1 | 1 | A–D | C–B
+| 1 | 2 | C–A | D–B
+| 1 | 3 | A–B | D–C
+| 2 | 4 | D–A | B–C
+| 2 | 5 | A–C | B–D
+| 2 | 6 | B–A | C–D
+|===
+
+Each team plays six games, three at home and three away. Cycle 2 swaps home and away for every
+pair in cycle 1.
+
+With a target of 8 instead (`fullCycles = 2`, `remainder = 2`), two more rounds run from where the
+rotation left off. Every pair meets two or three times.
+
+[[phase2-algorithm]]
+=== Phase 2: assigning fields and times
+
+`planr schedule assign` turns the matchup list into a dated schedule using
+https://developers.google.com/optimization/cp/cp_solver[Google OR-Tools CP-SAT], a
+constraint-programming solver. `practice assign` and `playoff assign` work the same way.
+
+==== Step 1: list the candidate slots
+
+Before the solver starts, the scheduler lists every valid start time in the scheduling window. It
+does this separately for each division, because divisions have different game lengths.
+
+. For every date and every field, work out the open window using the precedence rules in
+  <<availability>>.
+. Cut out any field blocks on that date. This may split the window into several pieces.
+. Drop the field on dates when a division lock gives it to another division. Also drop the
+  division's other fields on dates when the division holds a lock on some field.
+. Within each piece of the window, step forward in increments of `gridMinutes`. Every point where
+  a full game fits before the window closes becomes a *slot*: a date, field, and start time.
+. If the division has a curfew, drop every slot that starts after it.
+
+The slot count for each division is printed in the feasibility check. If a division ends up with no
+slots, the command stops before running the solver and names the division.
+
+==== Step 2: build the model
+
+The model has one true/false decision for each combination of game and slot. True means "play this
+game in this slot." The constraints are:
+
+C1: each game at most once::
+For each game, at most one of its slot decisions may be true. The rule is "at most once" rather than
+"exactly once" on purpose. If there aren't enough slots, the solver places as many games as it can
+and saves a partial draft instead of failing.
+
+C2: no overlapping use of a field::
+Checking every pair of games for overlap would grow with the square of the number of games. Instead,
+each slot is registered against every grid tick it occupies:
++
+----
+ticks covered = [slotStart, slotStart + gameDuration + fieldBufferMinutes), in gridMinutes steps
+----
++
+For each combination of field, date, and tick, at most one game may be active. The number of
+constraints then depends on the number of fields, days, and ticks, not on the number of games.
+
+C3: one game per team per day::
+For each team and date, at most one of that team's games may be scheduled.
+
+C4: weekly cap::
+For each team and ISO week, the number of games is at most `maxGamesPerWeek`.
+
+C5: rest days::
+For each team, games on dates closer together than `restDays + 1` days can't both be scheduled.
+C3 already covers games on the same day.
+
+==== Step 3: the objective
+
+The solver maximizes a single weighted score that ranks two goals in strict order:
+
+----
+maximize:  bigM × totalAssigned − maxWeekLoad
+where      bigM = totalGames + 1
+----
+
+* The *first goal* is to assign as many games as possible. The `bigM` weight makes one more
+  assigned game always worth more than any improvement in the second goal.
+* The *second goal* is to keep `maxWeekLoad` low. That value is the largest number of games any
+  team plays in one ISO week. Lowering it spreads games evenly over the season.
+
+For playoffs, a third term favors fields with a higher playoff priority.
+
+==== Step 4: solve and save
+
+The solver runs for up to 300 seconds and reports progress as it goes. It can stop early if it
+proves its answer is optimal.
+
+[cols="1,3",options="header"]
+|===
+| Solver result | What happens
+
+| `OPTIMAL` / `FEASIBLE`
+| Each chosen (game, slot) pair becomes a scheduled game. Games are sorted by date, time, and field,
+and a draft is saved even if some games weren't placed.
+
+| `UNKNOWN`
+| Time ran out before any solution was found. Field availability or the season window is usually too
+tight. No draft is saved.
+
+| `INFEASIBLE`
+| Shouldn't happen, because the model only uses "at most" constraints. Treated as an internal
+error.
+|===

@@ -16,6 +16,16 @@ gradle installDist
 
 This produces a runnable script at `build/install/planr/bin/planr`. Add it to your PATH or invoke it directly.
 
+## Documentation
+
+The full user guide lives in `docs/` as AsciiDoc and renders to both HTML and PDF:
+
+```
+gradle docs
+```
+
+Output: `build/docs/asciidoc/index.html` and `build/docs/asciidocPdf/index.pdf`.
+
 ---
 
 ## Quick start

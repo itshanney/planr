@@ -1,6 +1,8 @@
 plugins {
     id 'application'
     id 'java'
+    id 'org.asciidoctor.jvm.convert' version '4.0.5'
+    id 'org.asciidoctor.jvm.pdf' version '4.0.5'
 }
 
 group = 'org.leagueplan'
@@ -48,6 +50,24 @@ compileJava {
         "-Aproject=${project.group}/${project.name}",
         '-parameters'
     ]
+}
+
+// Both converters render the same docs/index.adoc (which pulls in docs/chapters/*.adoc via
+// include::), so HTML and PDF never drift apart. Output lands in build/docs/asciidoc/ and
+// build/docs/asciidocPdf/ respectively.
+def configureDocs = { task ->
+    task.sourceDir = file('docs')
+    task.sources { include 'index.adoc' }
+    task.baseDirFollowsSourceDir()
+    task.attributes 'revnumber': project.version
+}
+asciidoctor { configureDocs(it) }
+asciidoctorPdf { configureDocs(it) }
+
+tasks.register('docs') {
+    group = 'documentation'
+    description = 'Renders the user guide in docs/ to HTML and PDF.'
+    dependsOn asciidoctor, asciidoctorPdf
 }
 
 jar {

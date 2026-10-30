@@ -1,0 +1,149 @@
+[[configuration]]
+== League configuration
+
+League configuration holds the parameters that apply to every division and field. `schedule
+assign` requires sunrise, sunset, and the season dates. `schedule generate` requires the season
+dates.
+
+=== Setting configuration values
+
+[source]
+----
+planr config set [--sunrise <HH:mm>] [--sunset <HH:mm>]
+                 [--start <YYYY-MM-DD>] [--end <YYYY-MM-DD>]
+                 [--max-games-per-week <N>] [--rest-days <N>]
+                 [--field-buffer-minutes <N>] [--grid-minutes <N>]
+planr config show
+----
+
+[cols="2,1,4",options="header"]
+|===
+| Option | Default | Description
+
+| `--sunrise`
+| --
+| Default time every field opens, every day.
+
+| `--sunset`
+| --
+| Default time every field closes, every day.
+
+| `--start`
+| --
+| First day of the regular season.
+
+| `--end`
+| --
+| Last day of the regular season.
+
+| `--max-games-per-week`
+| `2`
+| Hard cap on games any team may play in one ISO calendar week.
+
+| `--rest-days`
+| `1`
+| Minimum calendar days between two games for the same team. With `1`, a team can't play on
+consecutive days. With `0`, only the same-day rule applies.
+
+| `--field-buffer-minutes`
+| `0`
+| Turnover time added after each game or practice before the field can be used again. `0` allows
+back-to-back games. Must be ≥ 0.
+
+| `--grid-minutes`
+| `30`
+| Interval between candidate start times. Must evenly divide 60: `1`, `2`, `3`, `4`, `5`, `6`,
+`10`, `12`, `15`, `20`, `30`, or `60`.
+|===
+
+Each option is independent. `config set` changes only the values you pass and keeps the rest.
+
+TIP: Changing configuration doesn't change an existing draft or finalized schedule. New values
+take effect the next time you run an `assign` command.
+
+.Example
+[source,console]
+----
+$ planr config set --sunrise 09:00 --sunset 18:00 --start 2026-06-01 --end 2026-08-31
+League config updated.
+
+$ planr config show
+League Configuration
+--------------------
+Sunrise:          09:00
+Sunset:           18:00
+Season start:     2026-06-01
+Season end:       2026-08-31
+Max games/week:   2 (default)
+Min rest days:    1 (default)
+Field buffer:     0 min (default)
+Grid interval:    30 min (default)
+
+Day-of-week windows:
+  Wednesday: 16:00 – 21:00
+
+Blocked days of week:
+  Sunday
+----
+
+[[config-dow]]
+=== Day-of-week windows
+
+A day-of-week window changes the open hours for *all fields* on one weekday. For example, if fields
+usually open at 09:00 but are only available on Wednesday evenings, set a Wednesday window rather
+than adding the same block to every field.
+
+[source]
+----
+planr config dow set   --day <DAY> --start <HH:mm> --end <HH:mm>
+planr config dow clear --day <DAY>
+planr config dow list
+----
+
+* `<DAY>` accepts full names (`wednesday`) or three-letter abbreviations (`wed`), in any case.
+* Setting a window for a day that already has one replaces it.
+* If field blocks or overrides already fall on matching dates in the season, a warning reports how
+  many.
+* A day-of-week window replaces the global sunrise/sunset. A field date override replaces the
+  day-of-week window (see <<availability>>).
+
+.Example
+[source,console]
+----
+$ planr config dow set --day wednesday --start 16:00 --end 21:00
+Day-of-week window set: Wednesday 16:00–21:00.
+
+$ planr config dow list
+DAY          OPEN   CLOSE
+-----------  -----  -----
+Wednesday    16:00  21:00
+----
+
+[[config-blockday]]
+=== Blocked days of the week
+
+A blocked day closes *all fields* on that weekday for the whole season, for example no games on
+Sundays.
+
+[source]
+----
+planr config blockday add    --day <DAY>
+planr config blockday remove --day <DAY>
+planr config blockday list
+----
+
+* `<DAY>` accepts full names or three-letter abbreviations, in any case.
+* Adding a day that is already blocked is an error.
+* A field date override on a specific field and date still applies on a blocked day. Use one to
+  open a single field on a single date, for example a rescheduled Sunday game.
+
+.Example
+[source,console]
+----
+$ planr config blockday add --day sunday
+Sunday added to blocked days.
+
+$ planr config blockday list
+Blocked days of week:
+  Sunday
+----

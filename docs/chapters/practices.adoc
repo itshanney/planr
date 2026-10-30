@@ -1,0 +1,91 @@
+[[practices]]
+== Pre-season practices
+
+Practices use the same two-phase pattern as the regular season. You configure a practice window and
+a number of practices per team for each division, then generate and assign.
+
+=== Configuring practice settings
+
+[source]
+----
+planr division edit <division> [--practice-count <n>] [--practice-duration-minutes <n>]
+                               [--practice-start <YYYY-MM-DD>] [--practice-end <YYYY-MM-DD>]
+----
+
+The four settings are independent. Any you leave out keep their current values.
+
+* `--practice-count` and `--practice-duration-minutes` must be at least 1.
+* `--practice-end` can't be earlier than `--practice-start`.
+* Both dates must be before the season start date, if one is set. Because of this, practice weeks
+  never overlap game weeks.
+
+`planr division list` shows the settings in the `PRAC_COUNT`, `PRAC_MIN`, `PRAC_START`, and
+`PRAC_END` columns. Unset values show as `--`.
+
+=== Phase 1: generate practice slots
+
+[source]
+----
+planr practice generate
+----
+
+Creates one practice slot per team for each practice in the count, in every division where all four
+practice settings are set. Divisions with a missing setting, and divisions that already have a
+practice schedule, are skipped with a warning. The command exits with code 1 if no division
+qualifies.
+
+=== Phase 2: assign fields and times
+
+[source]
+----
+planr practice assign
+----
+
+Clears any earlier practice assignments and runs the solver across every division with a practice
+schedule. Each division uses its own practice window and practice length. The maximum games per
+week and minimum rest days settings also apply to practices, counted within the practice window.
+
+*Prerequisites:* at least one practice schedule exists, at least one field exists, and sunrise and
+sunset are set.
+
+=== Viewing and clearing
+
+[source]
+----
+planr practice view [--division <name>]
+planr practice clear --division <name>
+----
+
+`view`:: Without `--division`, prints one summary line per division with its state
+(`NOT_CONFIGURED`, `NOT_STARTED`, `GENERATED`, `ASSIGNED`) and assigned/total slot counts. With
+`--division`, prints a table of every slot, sorted by date, then time, then team. Assigned slots
+come first. Slots that haven't been assigned show `UNASSIGNED`.
+
+`clear`:: After you confirm, deletes the division's practice schedule and returns it to
+`NOT_STARTED`. Other divisions are unaffected.
+
+.Example
+[source,console]
+----
+$ planr division edit Majors --practice-count 2 --practice-duration-minutes 60 \
+    --practice-start 2026-05-15 --practice-end 2026-05-30
+Division "Majors" updated.
+
+$ planr practice generate
+Generated 8 practice slots for Majors (4 teams × 2 practices).
+Practice generation complete: 1 division(s) processed, 8 total slots created.
+
+$ echo yes | planr practice assign
+...
+Practice field assignment complete: 8/8 slots assigned across 1 division(s).
+
+$ planr practice view --division Majors
+Division: Majors | State: ASSIGNED | Period: 2026-05-15 to 2026-05-30
+
+TEAM       DATE        TIME   FIELD
+---------  ----------  -----  --------------
+Blue Jays  2026-05-23  12:00  Riverside Park
+Blue Jays  2026-05-25  16:00  Hillside Field
+Cardinals  2026-05-19  13:00  Riverside Park
+...
+----

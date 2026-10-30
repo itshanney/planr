@@ -16,6 +16,7 @@ gradle test                 # run all tests
 gradle assemble             # build JAR and distribution scripts
 gradle installDist          # produce runnable scripts at build/install/planr/bin/planr
 gradle run --args="division list"   # run the CLI via Gradle
+gradle docs                 # render docs/ (AsciiDoc) to build/docs/asciidoc/index.html and build/docs/asciidocPdf/index.pdf
 ```
 
 **Run a single test class:**
@@ -38,16 +39,17 @@ gradle test --tests "org.leagueplan.planr.command.DivisionCommandTest.Add.succes
 
 ### Command dispatch chain
 
-Picocli routes from `PlanrApp` to top-level command classes (`ConfigCommand`, `DivisionCommand`, `TeamCommand`, `FieldCommand`, `ScheduleCommand`, `PlayoffCommand`, `PracticeCommand`), each of which declares its CRUD operations as static inner classes. Several second-level nested subcommands are registered under their parents:
+Picocli routes from `PlanrApp` to top-level command classes (`ConfigCommand`, `DivisionCommand`, `TeamCommand`, `FieldCommand`, `ScheduleCommand`, `PlayoffCommand`, `PracticeCommand`, `CalendarCommand`), each of which (except the leaf `CalendarCommand`, which delegates rendering to `CalendarRenderer`) declares its CRUD operations as static inner classes. Several second-level nested subcommands are registered under their parents:
 
 - `FieldBlockCommand` and `FieldOverrideCommand` under `FieldCommand` → `planr field block <add|edit|delete|list>` and `planr field override <add|edit|delete|list>`
 - `FieldLockCommand` under `FieldCommand` → `planr field lock <add|delete|list>`
 - `ScheduleGameCommand` under `ScheduleCommand` → `planr schedule game <edit|override>`
-- `ConfigDowCommand` under `ConfigCommand` → `planr config dow <add|delete|list>`
-- `ConfigBlockdayCommand` under `ConfigCommand` → `planr config blockday <add|delete|list>`
+- `ConfigDowCommand` under `ConfigCommand` → `planr config dow <set|clear|list>`
+- `ConfigBlockdayCommand` under `ConfigCommand` → `planr config blockday <add|remove|list>`
 
 Commands access the store by traversing `@ParentCommand` references:
 - Top-level commands (`PlayoffCommand`, `PracticeCommand`, etc.): `parent.app.store`
+- `CalendarCommand` (no inner subcommands): `app.store`
 - `FieldBlockCommand`, `FieldOverrideCommand`, and `FieldLockCommand` inner classes: `parent.fieldCmd.app.store`
 - `ScheduleGameCommand` inner classes: `parent.scheduleCmd.app.store`
 - `ConfigDowCommand` and `ConfigBlockdayCommand` inner classes: `parent.configCmd.app.store`
@@ -121,6 +123,7 @@ Command tests extend `CommandTestBase`, which redirects `System.out`/`System.err
 
 - `features/` — product requirements documents (PRDs) written before implementation
 - `specs/` — technical design documents written before coding; one spec per feature slice
+- `docs/` — user guide (AsciiDoc). `docs/index.adoc` is the master document; chapters live in `docs/chapters/` and are pulled in via `include::`. Update the relevant chapter when user-facing behavior changes.
 
 New feature work follows: PRD in `features/` → tech spec in `specs/` → implementation. Consult the relevant spec before modifying a feature area.
 

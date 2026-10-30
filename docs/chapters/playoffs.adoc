@@ -1,0 +1,103 @@
+[[playoffs]]
+== Playoffs
+
+Playoffs use the same two-phase pattern. Phase 1 builds a double-elimination bracket for one
+division. Phase 2 assigns fields and times for all brackets at once.
+
+=== Phase 1: generate a bracket
+
+[source]
+----
+planr playoff generate --division <name> --start <YYYY-MM-DD> --end <YYYY-MM-DD>
+                       --seeds <team> [--seeds <team> ...]
+----
+
+Pass `--seeds` once for each team, in seed order, starting with the top seed.
+
+How the bracket is built:
+
+* The N teams are padded up to the next power of two. The top seeds get *byes* in the first
+  winners' round.
+* Later rounds refer to earlier games by position. For example, `W of G3` means the winner of game
+  3, and `L of G2` means the loser of game 2.
+* The last slot is a *conditional* championship rematch, marked `*`. It is played only if the
+  winners'-bracket team loses the first championship game.
+
+Validation:
+
+* The division must exist and have 2 to 16 teams.
+* `--end` can't be earlier than `--start`.
+* The number of seeds must equal the number of teams in the division. Every seed must name a team
+  in the division (ignoring case), and no team can appear twice.
+* The division must not already have a bracket. Run `playoff clear` first.
+
+=== Phase 2: assign fields and times
+
+[source]
+----
+planr playoff assign
+----
+
+Clears any earlier playoff assignments and runs the solver across every division that has a
+bracket. All brackets must use the same start and end dates, which is checked before the solver
+starts. Bye slots and the conditional rematch aren't scheduled.
+
+If any fields have a playoff priority (<<field-playoff-priority>>), the solver prefers
+higher-ranked fields as a secondary goal. When the run finishes, a *Field Utilization* table lists
+each field that received playoff games, its rank, and its game count:
+
+[source,console]
+----
+Field Utilization
+-----------------
+FIELD           PLAYOFF_PRI  GAMES
+--------------  -----------  -----
+Riverside Park  1            6
+Eastside Field  1            5
+Community Park  2            2
+Backup Field    --           1
+----
+
+*Prerequisites:* at least one bracket exists, all brackets share one date range, at least one field
+exists, and sunrise and sunset are set.
+
+=== Viewing and clearing
+
+[source]
+----
+planr playoff status [--division <name>]
+planr playoff clear --division <name>
+----
+
+`status`:: Without `--division`, prints one line per division with its state (`NOT_STARTED`,
+`GENERATED`, `ASSIGNED`). With `--division`, prints the full bracket table: `SLOT`, `ROUND`,
+`POSITION A`, `POSITION B`, and `ASSIGNED`. Byes show `BYE`. Games that haven't been assigned show
+`UNASSIGNED`. The conditional rematch is marked `*`.
+
+`clear`:: After you confirm, deletes the division's bracket and returns it to `NOT_STARTED`. Other
+divisions are unaffected.
+
+.Example
+[source,console]
+----
+$ planr field edit "Riverside Park" --playoff-priority 1
+Field "Riverside Park" updated.
+
+$ planr playoff generate --division Majors --start 2026-09-05 --end 2026-09-20 \
+    --seeds Yankees --seeds "Red Sox" --seeds Cardinals --seeds "Blue Jays"
+
+SLOT  ROUND         POSITION A  POSITION B  BYE
+----  ------------  ----------  ----------  ---
+G1    Winners R1    Yankees     Blue Jays
+G2    Winners R1    Red Sox     Cardinals
+...
+
+$ echo yes | planr playoff assign
+...
+Playoff field assignment complete: 6/6 game slots assigned across 1 division(s).
+
+$ planr playoff status
+DIVISION  STATE
+--------  -----------
+Majors    ASSIGNED
+----

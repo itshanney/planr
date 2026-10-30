@@ -1,0 +1,45 @@
+[appendix]
+[[data-file]]
+== The data file
+
+=== Location and safety
+
+`planr` keeps all league data in a single JSON file, `~/.planr/league.json`. Each change is written
+to a temporary file first, then moved into place in one atomic step. If a write is interrupted, the
+previous version of the file stays intact.
+
+TIP: To back up a league, or keep several leagues, copy `league.json`. `planr` always reads from the
+fixed path, so to switch leagues, copy the file you want into place.
+
+=== Format
+
+* Times are written as `"HH:mm"`, dates as `"YYYY-MM-DD"`, and days of the week by name (for example
+  `"WEDNESDAY"`).
+* Unknown properties are ignored when the file is read, so a file written by a newer version of
+  `planr` can still be read by an older one.
+
+=== Schema versions
+
+The file has a top-level `version` field. The current version is *10*. When `planr` loads an older
+file, it upgrades it step by step to the current version. The upgraded file is written back the
+next time a command saves data.
+
+[cols="1,1,4",options="header"]
+|===
+| From | To | Change
+
+| 1 | 2 | Adds an empty `fields` list.
+| 2 | 3 | Marker only.
+| 3 | 4 | Removes per-field availability windows and adds league configuration. Prints a warning, because
+the old windows must be re-entered as configuration, blocks, or overrides.
+| 4 | 5 | League configuration gains day-of-week windows and blocked days.
+| 5 | 6 | League configuration gains max games per week and minimum rest days. Fields gain division
+locks.
+| 6 | 7 | The league gains playoffs.
+| 7 | 8 | The league gains practice schedules.
+| 8 | 9 | League configuration gains field buffer and grid interval.
+| 9 | 10 | Divisions gain curfew time. Fields gain playoff priority.
+|===
+
+Every step after version 4 only updates the version number. The new fields start out empty or unset,
+which means "use the default."

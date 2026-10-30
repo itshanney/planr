@@ -1,0 +1,94 @@
+[[divisions-and-teams]]
+== Divisions and teams
+
+=== Divisions
+
+A division is a group of teams, usually by age or skill level, that play each other. Each division
+has:
+
+* a *game duration* in minutes, used to fit games into field time
+* a *target* number of games per team for the regular season.
+
+[source]
+----
+planr division add <name> --duration <minutes> --target <n>
+planr division edit <name> [--name <new-name>] [--duration <minutes>] [--target <n>]
+                           [--curfew-time <HH:mm>] [--no-curfew-time]
+                           [--practice-count <n>] [--practice-duration-minutes <minutes>]
+                           [--practice-start <YYYY-MM-DD>] [--practice-end <YYYY-MM-DD>]
+planr division delete <name>
+planr division list
+----
+
+* The smallest valid target is *N−1*, where N is the number of teams. That is enough for one full
+  round-robin. Phase 1 checks this.
+* You can only delete a division that has no teams.
+* The practice options are covered in <<practices>>.
+
+.Example
+[source,console]
+----
+$ planr division add Majors --duration 120 --target 6
+Division "Majors" added (120 min/game, target 6 games/team).
+
+$ planr division list
+DIVISION    DURATION    TARGET    TEAMS    PRAC_COUNT    PRAC_MIN    PRAC_START    PRAC_END    CURFEW
+--------    --------    ------    -----    ----------    --------    ----------    --------    ------
+Majors      120 min     6         4        --            --          --            --          --
+----
+
+[[division-curfew]]
+==== Curfew time
+
+[source]
+----
+planr division edit <name> --curfew-time <HH:mm>
+planr division edit <name> --no-curfew-time
+----
+
+A curfew is the latest time a game or practice for the division may *start*. Starting exactly at
+the curfew is allowed. Later start times are dropped before the solver runs. Use a curfew to keep
+younger players from late-evening games.
+
+* `--curfew-time` takes a 24-hour `HH:mm` time. `24:00` and out-of-range values are rejected.
+* `--no-curfew-time` removes the curfew. Running it on a division without a curfew does nothing.
+* You can't pass both flags together.
+* The curfew applies to regular-season games, playoff games, and practices.
+* If the curfew leaves no available start times, `schedule assign`, `playoff assign`, and
+  `practice assign` exit with code 1 and name the division.
+
+`planr division list` shows the curfew in the `CURFEW` column, or `--` when none is set.
+
+.Example
+[source,console]
+----
+$ planr division edit "6U" --curfew-time 19:30
+Division "6U" updated.
+----
+
+=== Teams
+
+Each team belongs to one division. Team names must be unique within a division, ignoring case.
+
+[source]
+----
+planr team add <division> <team>
+planr team edit <division> <team> --name <new-name>
+planr team delete <division> <team>
+planr team list <division>
+----
+
+`team list` prints the division's teams in alphabetical order.
+
+.Example
+[source,console]
+----
+$ planr team add Majors "Blue Jays"
+Team "Blue Jays" added to division "Majors".
+
+$ planr team list Majors
+Blue Jays
+Cardinals
+Red Sox
+Yankees
+----

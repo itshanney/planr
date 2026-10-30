@@ -1,0 +1,111 @@
+[[concepts]]
+== Core concepts
+
+This chapter introduces the main terms, which later chapters use without redefining.
+
+=== League model
+
+[cols="1,3",options="header"]
+|===
+| Entity | Description
+
+| League configuration
+| Season start and end dates, the default daily field window (sunrise to sunset), day-of-week
+windows, blocked days, and scheduling limits: maximum games per week, minimum rest days, field
+buffer, and start-time grid.
+
+| Division
+| A group of teams that play each other. It defines the game duration, the target number of games
+per team, an optional curfew, and optional practice settings.
+
+| Team
+| Belongs to exactly one division. Names must be unique within that division.
+
+| Field
+| A place to play. It can carry date-specific blocks, date overrides, division locks, and a playoff
+priority rank.
+|===
+
+[[schedule-lifecycle]]
+=== Regular-season schedule lifecycle
+
+The regular-season schedule moves through these states. `planr schedule status` shows the current
+one.
+
+[cols="1,3",options="header"]
+|===
+| State | Meaning
+
+| `NONE`
+| No schedule has been generated yet.
+
+| `TEAM_SCHEDULE`
+| Phase 1 is complete. Matchups and home/away assignments exist, but no dates, times, or fields.
+
+| `DRAFT`
+| Phase 2 is complete. Every assigned game has a date, start time, and field. You can review it and
+re-run the phases.
+
+| `FINALIZED`
+| The schedule is locked. It can't be regenerated. Individual games can still be overridden.
+|===
+
+[source]
+----
+NONE ──generate──▶ TEAM_SCHEDULE ──assign──▶ DRAFT ──finalize──▶ FINALIZED
+                        ▲                      │                     │
+                        └──────generate────────┘              game override
+----
+
+Practices and playoffs track state *per division*:
+
+* Practices: `NOT_CONFIGURED`, `NOT_STARTED`, `GENERATED`, `ASSIGNED`.
+* Playoffs: `NOT_STARTED`, `GENERATED`, `ASSIGNED`.
+
+`clear` returns a division to `NOT_STARTED`.
+
+[[availability]]
+=== Field availability
+
+By default, every field is open from the league sunrise to the league sunset on every day of the
+season. For each field and date, the scheduler works out the open window by checking these rules in
+order. The first rule that applies wins:
+
+. *Field date override* -- a custom open window for one field on one date
+  (<<field-overrides>>). It beats every other rule, including blocked days, so you can open a field
+  on a single date that would otherwise be blocked.
+. *Blocked day of the week* -- the day is closed for all fields (<<config-blockday>>).
+. *Day-of-week window* -- a league-wide window for that weekday, such as Wednesdays 16:00 to 21:00
+  (<<config-dow>>).
+. *Global sunrise/sunset* -- the default league window (<<configuration>>).
+
+Two further steps then narrow the window:
+
+* *Field blocks* for that date are cut out of it, which may split it into several pieces
+  (<<field-blocks>>).
+* *Division locks* remove the field entirely for every division except the lock owner. They also
+  keep the lock owner on its locked field during the lock period (<<field-locks>>).
+
+Finally, a division's *curfew* drops every candidate start time later than the curfew
+(<<division-curfew>>).
+
+[[scheduling-constraints]]
+=== Scheduling constraints
+
+During Phase 2, the solver treats these as *hard* constraints. It leaves a game unassigned rather
+than break one.
+
+[cols="1,4",options="header"]
+|===
+| ID | Rule
+
+| C1 | Each game is assigned at most once.
+| C2 | No two events on the same field overlap, including the configured field buffer.
+| C3 | No team plays more than once on the same calendar day.
+| C4 | No team exceeds the maximum games per ISO calendar week (default 2).
+| C5 | Each team has at least the minimum number of rest days between games (default 1).
+|===
+
+Within those limits, the solver first assigns as many games as possible. It then spreads each
+team's games as evenly as possible across the weeks of the season. <<phase2-algorithm>> explains
+how.

@@ -1,0 +1,64 @@
+= planr User Guide
+:description: User guide and command reference for planr, the little league schedule planner.
+:doctype: book
+:revnumber: {revnumber}
+:toc: left
+:toclevels: 3
+:sectnums:
+:sectnumlevels: 3
+:sectanchors:
+:sectlinks:
+:icons: font
+:source-highlighter: rouge
+:source-language: console
+:xrefstyle: short
+:chapter-signifier: Chapter
+:appendix-caption: Appendix
+:imagesdir: images
+
+[preface]
+== About this guide
+
+`planr` is a command-line tool that helps little league organizers set up divisions, teams, and
+fields, then generate balanced game, practice, and playoff schedules.
+
+This guide covers the whole workflow: first-time setup, every command, and how the scheduling
+algorithms make their decisions. It is written for league organizers who run the tool and for
+developers who need to understand its behavior.
+
+The same AsciiDoc sources produce both the HTML and the PDF editions of this guide. See
+<<building-docs>> for how to rebuild them.
+
+.Conventions used in this guide
+* `planr division add` -- a command you type.
+* `<name>` -- a value you supply.
+* `[--flag]` -- an optional flag.
+* Lines that start with `$` in examples are commands. The lines that follow are the output.
+
+include::chapters/introduction.adoc[]
+
+include::chapters/getting-started.adoc[]
+
+include::chapters/concepts.adoc[]
+
+include::chapters/configuration.adoc[]
+
+include::chapters/divisions-and-teams.adoc[]
+
+include::chapters/fields.adoc[]
+
+include::chapters/regular-season.adoc[]
+
+include::chapters/practices.adoc[]
+
+include::chapters/playoffs.adoc[]
+
+include::chapters/calendar.adoc[]
+
+include::chapters/algorithms.adoc[]
+
+include::chapters/command-reference.adoc[]
+
+include::chapters/data-file.adoc[]
+
+include::chapters/building-docs.adoc[]
